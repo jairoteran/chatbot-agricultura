@@ -1,0 +1,7 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+llama-index-core>=0.10.0
+llama-index-readers-file>=0.1.0
+llama-index-embeddings-huggingface>=0.2.0
+sentence-transformers>=2.7.0
+pypdf>=4.2.0
