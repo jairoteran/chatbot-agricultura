@@ -1,0 +1,19 @@
+{
+  "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "files": [
+    {
+      "file_name": "PAPA.pdf",
+      "relative_path": "PAPA.pdf",
+      "size": 3181095,
+      "mtime_ns": 1776354625963278100,
+      "fingerprint": "2a6637b1529017be8390cea137553eff0440bb5fbdf2de50838d157e8b313499"
+    },
+    {
+      "file_name": "Pumisacho y Sherwood Cultivo de Papa en Ecuador.pdf",
+      "relative_path": "Pumisacho y Sherwood Cultivo de Papa en Ecuador.pdf",
+      "size": 1654401,
+      "mtime_ns": 1776354629497197400,
+      "fingerprint": "329995a319ef586a1781a700cf4e9115d19dd313051e19fb2afd9aa4adc52407"
+    }
+  ]
+}

@@ -6,7 +6,6 @@ __pycache__/
 .vscode/
 .venv/
 venv/
-backend/storage/
 frontend/node_modules/
 frontend/dist/
 backend/.env
