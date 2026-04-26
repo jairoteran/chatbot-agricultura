@@ -67,7 +67,7 @@ npm install
 
 ### 2. Configurar variables opcionales
 
-Puedes crear `frontend/.env` a partir de `frontend/.env.example`.
+Puedes crear `frontend/.env` a partir de `frontend/.env.example`, que ya esta incluido en el repo.
 
 ```env
 VITE_API_URL=/api/chat
@@ -106,8 +106,8 @@ Si prefieres ejecutarlos en segundo plano dentro de la misma sesion:
 
 ## Mejoras incluidas
 
-1. El backend detecta cambios en los PDFs y reconstruye el indice cuando hace falta.
-2. El indice vectorial se persiste en `backend/storage/`.
+1. El backend detecta cambios en los PDFs y reutiliza el indice persistido cuando no hubo cambios.
+2. El indice vectorial se persiste en `backend/storage/` y puede reconstruirse manualmente.
 3. El backend expone estado de salud y reindexacion manual.
 4. El frontend muestra el estado del backend, las fuentes usadas y un boton de reindexado.
 5. Si no hay evidencia suficiente, el sistema responde claramente que no encontro informacion suficiente.
@@ -115,5 +115,7 @@ Si prefieres ejecutarlos en segundo plano dentro de la misma sesion:
 ## Nota importante
 
 La primera vez que se ejecute el backend, el modelo de embeddings puede descargarse automaticamente. Eso requiere conexion a internet en ese momento.
+
+Algunos PDFs protegidos o cifrados requieren la dependencia `cryptography`, que ya esta incluida en `backend/requirements.txt`.
 
 Si el chat muestra un error de conexion o el backend responde que no esta listo, revisa `http://localhost:8000/health`.

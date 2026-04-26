@@ -26,6 +26,9 @@ function App() {
     indexed_files: [],
     indexed_file_count: 0,
     index_ready: false,
+    index_source: "startup",
+    last_index_seconds: 0,
+    embed_model: "",
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -50,7 +53,10 @@ function App() {
     async function loadHealth() {
       try {
         const response = await fetch(HEALTH_URL);
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || "No pude consultar el estado del backend.");
+        }
         if (!active) {
           return;
         }
@@ -67,6 +73,9 @@ function App() {
           indexed_files: [],
           indexed_file_count: 0,
           index_ready: false,
+          index_source: "startup",
+          last_index_seconds: 0,
+          embed_model: "",
         });
       }
     }
@@ -125,7 +134,10 @@ function App() {
         ...nextMessages,
         {
           role: "assistant",
-          content: error.message || fallbackMessage,
+          content:
+            error instanceof TypeError
+              ? fallbackMessage
+              : error.message || fallbackMessage,
           sources: [],
         },
       ]);
@@ -169,7 +181,10 @@ function App() {
         ...currentMessages,
         {
           role: "assistant",
-          content: error.message || "No fue posible reindexar los documentos.",
+          content:
+            error instanceof TypeError
+              ? "No pude conectar con el backend para reindexar. Verifica que FastAPI este corriendo en http://localhost:8000."
+              : error.message || "No fue posible reindexar los documentos.",
           sources: [],
         },
       ]);
@@ -186,6 +201,12 @@ function App() {
   }
 
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
+  const indexSourceLabel =
+    backendStatus.index_source === "storage"
+      ? "Indice cargado desde almacenamiento"
+      : backendStatus.index_source === "rebuild"
+        ? "Indice reconstruido desde PDFs"
+        : "Inicializando indice";
 
   return (
     <div className="app-shell">
@@ -210,6 +231,15 @@ function App() {
           <p className="status-meta">
             {backendStatus.indexed_file_count} documento(s) indexado(s)
           </p>
+          <p className="status-meta">
+            {indexSourceLabel}
+            {backendStatus.last_index_seconds > 0
+              ? ` en ${backendStatus.last_index_seconds.toFixed(2)} s`
+              : ""}
+          </p>
+          {backendStatus.embed_model && (
+            <p className="status-meta">Embeddings: {backendStatus.embed_model}</p>
+          )}
           <button
             className="secondary-button"
             type="button"

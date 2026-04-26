@@ -2,6 +2,62 @@
   "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
   "files": [
     {
+      "file_name": "Agenda_Tungurahua_2019-2023.pdf",
+      "relative_path": "Agenda_Tungurahua_2019-2023.pdf",
+      "size": 8512855,
+      "mtime_ns": 1777003654000000000,
+      "fingerprint": "bf508eef36426a439b39fd5d4f7be05c56e40b3d6e69b5137afb844590112e7f"
+    },
+    {
+      "file_name": "Agricultura ancestral camellones y albarradas.pdf",
+      "relative_path": "Agricultura ancestral camellones y albarradas.pdf",
+      "size": 10429832,
+      "mtime_ns": 1777002041000000000,
+      "fingerprint": "b79dbd37a9996a46795395ac4e56a8ef1e230a016f0a3eab61c8683b4a9484fe"
+    },
+    {
+      "file_name": "CHAKRA ANDINA UN SISTEMA AGR\u00cdCOLA ANCESTRAL cotacachi.pdf",
+      "relative_path": "CHAKRA ANDINA UN SISTEMA AGR\u00cdCOLA ANCESTRAL cotacachi.pdf",
+      "size": 18578274,
+      "mtime_ns": 1777001771000000000,
+      "fingerprint": "ab3181f45ec8b6a44141051e1a3c83ed12f71daa3c1c72fe749c129ad33dd2d7"
+    },
+    {
+      "file_name": "Dialnet-AgroecologiaEnElEcuadorProcesoHistoricoLogrosYDesa-7567032.pdf",
+      "relative_path": "Dialnet-AgroecologiaEnElEcuadorProcesoHistoricoLogrosYDesa-7567032.pdf",
+      "size": 712514,
+      "mtime_ns": 1777001955000000000,
+      "fingerprint": "4376e914ff7ffd14c2a755020cb8e96be5b45bb5635e64ab9b4af923f3584679"
+    },
+    {
+      "file_name": "Dialnet-LaRevalorizacionDeLaIdentidadCultural-9587514.pdf",
+      "relative_path": "Dialnet-LaRevalorizacionDeLaIdentidadCultural-9587514.pdf",
+      "size": 357843,
+      "mtime_ns": 1777001180000000000,
+      "fingerprint": "3aa885deb5210f546871c33c4510ce82f8bb4d1ee2c2b567b45796becac28248"
+    },
+    {
+      "file_name": "Dialnet-SaberesAncestrales-8168767.pdf",
+      "relative_path": "Dialnet-SaberesAncestrales-8168767.pdf",
+      "size": 227456,
+      "mtime_ns": 1777003749000000000,
+      "fingerprint": "69257a1457b5cce2d8a6206ae2b943c4b23a8ab40e2198393d7e43d32b8b49d3"
+    },
+    {
+      "file_name": "E1-1-Modulo-Saberes-Ancestrales-2-ministerio-ecuador.pdf",
+      "relative_path": "E1-1-Modulo-Saberes-Ancestrales-2-ministerio-ecuador.pdf",
+      "size": 3762257,
+      "mtime_ns": 1777002911000000000,
+      "fingerprint": "619cc2dd4d77ef7c80fcc549776c9a6c86ef2e493e103e18a8ff4e83b9ae1811"
+    },
+    {
+      "file_name": "Estudio-Saberes-Ancestrales_web-SP.pdf",
+      "relative_path": "Estudio-Saberes-Ancestrales_web-SP.pdf",
+      "size": 1967388,
+      "mtime_ns": 1777003831000000000,
+      "fingerprint": "c3698405ce9115a72bc76fa53d12b3bbb3ebc42acd41bc471156e4e6f627125e"
+    },
+    {
       "file_name": "PAPA.pdf",
       "relative_path": "PAPA.pdf",
       "size": 3181095,
@@ -14,6 +70,41 @@
       "size": 1654401,
       "mtime_ns": 1776354629497197400,
       "fingerprint": "329995a319ef586a1781a700cf4e9115d19dd313051e19fb2afd9aa4adc52407"
+    },
+    {
+      "file_name": "Ra\u00edces y tub\u00e9rculos andinos cultivos marginados en el Ecuador _.pdf",
+      "relative_path": "Ra\u00edces y tub\u00e9rculos andinos cultivos marginados en el Ecuador _.pdf",
+      "size": 503828,
+      "mtime_ns": 1777002439000000000,
+      "fingerprint": "4f684ed64e2490173cbeabd3ddd554da54401201af4ec26e3080dcbe340508a7"
+    },
+    {
+      "file_name": "Resumen-Ejecutivo-Diagn\u00f3sticos-Territoriales-del-Sector-Agrario_14-08-2020-1_compressed.pdf",
+      "relative_path": "Resumen-Ejecutivo-Diagn\u00f3sticos-Territoriales-del-Sector-Agrario_14-08-2020-1_compressed.pdf",
+      "size": 1608268,
+      "mtime_ns": 1777003570000000000,
+      "fingerprint": "d158b62bd1e9b4d333df2a09987c6124f3637936ff0e06eec0937afcc3a7bcf6"
+    },
+    {
+      "file_name": "Sistemas de producci\u00f3n en \u00e1reas con cangahua SIERRA NORTE ECUADOR.pdf",
+      "relative_path": "Sistemas de producci\u00f3n en \u00e1reas con cangahua SIERRA NORTE ECUADOR.pdf",
+      "size": 1435051,
+      "mtime_ns": 1777003682000000000,
+      "fingerprint": "6cd674cce5d92e116cc22d3e1d1927996421973cc513ac77ad01e22c229780a6"
+    },
+    {
+      "file_name": "editum,+Cap+08+AGROECOLOGI\u00c2\u00a6\u00c3\u00bcA+EN+EL+ECUADOR.+PROCESO+HISTO\u00c2\u00a6\u00c3\u00bcRICO,+LOGROS+Y+DESAFI\u00c2\u00a6\u00c3\u00bcOS.pdf",
+      "relative_path": "editum,+Cap+08+AGROECOLOGI\u00c2\u00a6\u00c3\u00bcA+EN+EL+ECUADOR.+PROCESO+HISTO\u00c2\u00a6\u00c3\u00bcRICO,+LOGROS+Y+DESAFI\u00c2\u00a6\u00c3\u00bcOS.pdf",
+      "size": 418738,
+      "mtime_ns": 1777003497000000000,
+      "fingerprint": "c7c8c835b20c323d2fbe4ef9ef8f1510b50e7b0b5d9a849def987c5f81f64fd0"
+    },
+    {
+      "file_name": "pr\u00e1cticas y saberes ancestrales de los agricultores de San Joaqu\u00edn Cuenca.pdf",
+      "relative_path": "pr\u00e1cticas y saberes ancestrales de los agricultores de San Joaqu\u00edn Cuenca.pdf",
+      "size": 2694769,
+      "mtime_ns": 1777001878000000000,
+      "fingerprint": "b96b16be5497233dc66fb4122e3b42e4ef87b63661bb13b8e59ca13501cef55a"
     }
   ]
 }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import unicodedata
 from hashlib import sha256
 from pathlib import Path
 
@@ -23,7 +25,7 @@ SIMILARITY_THRESHOLD = 0.35
 REQUIRED_STORAGE_FILES = (
     "docstore.json",
     "index_store.json",
-    "vector_store.json",
+    "default__vector_store.json",
 )
 MANIFEST_FILE = STORAGE_DIR / "manifest.json"
 CHUNK_CACHE_FILE = STORAGE_DIR / "chunk_cache.json"
@@ -109,6 +111,8 @@ class RAGService:
         self.retriever = None
         self.indexed_files: list[str] = []
         self.chunk_cache: list[dict] = []
+        self.last_index_source = "startup"
+        self.last_index_seconds = 0.0
         self._configure_embeddings()
         self.ensure_index_ready()
 
@@ -123,8 +127,10 @@ class RAGService:
             ) from exc
 
     def ensure_index_ready(self, force_rebuild: bool = False) -> None:
+        started_at = time.perf_counter()
         self.index = self._load_or_build_index(force_rebuild=force_rebuild)
         self.retriever = self.index.as_retriever(similarity_top_k=TOP_K)
+        self.last_index_seconds = round(time.perf_counter() - started_at, 2)
 
     def _load_or_build_index(self, force_rebuild: bool = False) -> VectorStoreIndex:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -143,6 +149,7 @@ class RAGService:
         if not force_rebuild and self._has_usable_persisted_index(current_manifest):
             storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
             self.chunk_cache = json.loads(CHUNK_CACHE_FILE.read_text(encoding="utf-8"))
+            self.last_index_source = "storage"
             return load_index_from_storage(storage_context)
 
         splitter = SentenceSplitter(chunk_size=700, chunk_overlap=120)
@@ -150,6 +157,7 @@ class RAGService:
         self.chunk_cache = self._serialize_nodes(nodes)
         index = VectorStoreIndex(nodes)
         index.storage_context.persist(persist_dir=str(STORAGE_DIR))
+        self.last_index_source = "rebuild"
         MANIFEST_FILE.write_text(
             json.dumps(current_manifest, indent=2, ensure_ascii=True),
             encoding="utf-8",
@@ -214,6 +222,9 @@ class RAGService:
             "indexed_files": self.indexed_files,
             "indexed_file_count": len(self.indexed_files),
             "index_ready": self.index is not None,
+            "index_source": self.last_index_source,
+            "last_index_seconds": self.last_index_seconds,
+            "embed_model": EMBED_MODEL,
         }
 
     def reindex(self) -> dict:
@@ -222,6 +233,8 @@ class RAGService:
             "status": "ok",
             "detail": "Indice reconstruido correctamente",
             "indexed_files": self.indexed_files,
+            "index_source": self.last_index_source,
+            "last_index_seconds": self.last_index_seconds,
         }
 
     def query(self, question: str) -> dict:
@@ -427,9 +440,14 @@ class RAGService:
         return self._normalize_tokens(question)
 
     def _normalize_tokens(self, text: str) -> set[str]:
+        normalized_text = self._normalize_text(text)
         tokens = {
             token
-            for token in re.findall(r"[a-zA-Z0-9]+", text.lower())
+            for token in re.findall(r"[a-z0-9]+", normalized_text)
             if len(token) > 2 and token not in STOP_WORDS
         }
         return tokens
+
+    def _normalize_text(self, text: str) -> str:
+        ascii_text = unicodedata.normalize("NFKD", text.lower())
+        return "".join(char for char in ascii_text if not unicodedata.combining(char))
