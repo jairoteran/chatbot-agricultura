@@ -7,7 +7,7 @@ const REINDEX_URL = import.meta.env.VITE_REINDEX_URL || "/api/reindex";
 const initialMessage = {
   role: "assistant",
   content:
-    "Hola. Estoy listo para responder usando solo el contenido de los PDFs cargados en el backend.",
+    "Hola. Estoy listo para analizar los PDFs cargados y responder con base en su contenido.",
   sources: [],
 };
 
@@ -29,6 +29,8 @@ function App() {
     index_source: "startup",
     last_index_seconds: 0,
     embed_model: "",
+    response_mode: "extractive",
+    llm_model: "",
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -76,6 +78,8 @@ function App() {
           index_source: "startup",
           last_index_seconds: 0,
           embed_model: "",
+          response_mode: "extractive",
+          llm_model: "",
         });
       }
     }
@@ -103,12 +107,20 @@ function App() {
     setIsLoading(true);
 
     try {
+      const history = messages
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .slice(-6)
+        .map((message) => ({
+          role: message.role,
+          content: message.content,
+        }));
+
       const response = await fetch(CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, history }),
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -207,6 +219,10 @@ function App() {
       : backendStatus.index_source === "rebuild"
         ? "Indice reconstruido desde PDFs"
         : "Inicializando indice";
+  const responseModeLabel =
+    backendStatus.response_mode === "generative-rag"
+      ? `Modo conversacional con ${backendStatus.llm_model || "LLM"}`
+      : "Modo basico sin modelo generativo";
 
   return (
     <div className="app-shell">
@@ -240,6 +256,7 @@ function App() {
           {backendStatus.embed_model && (
             <p className="status-meta">Embeddings: {backendStatus.embed_model}</p>
           )}
+          <p className="status-meta">{responseModeLabel}</p>
           <button
             className="secondary-button"
             type="button"

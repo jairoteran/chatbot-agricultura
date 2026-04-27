@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import unicodedata
@@ -16,10 +17,12 @@ from llama_index.core import (
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.node_parser import SentenceSplitter
+from openai import OpenAI
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 TOP_K = 5
 SIMILARITY_THRESHOLD = 0.35
 REQUIRED_STORAGE_FILES = (
@@ -103,6 +106,30 @@ STOP_WORDS = {
     "y",
     "ya",
 }
+GENERIC_TOPIC_WORDS = {
+    "agricultura",
+    "agricultores",
+    "ancestrales",
+    "cargados",
+    "cultivo",
+    "cultivos",
+    "documento",
+    "documentos",
+    "ecuador",
+    "informacion",
+    "manejo",
+    "pdf",
+    "pdfs",
+    "practicas",
+    "pregunta",
+    "produccion",
+    "saberes",
+    "sector",
+    "sistema",
+    "sistemas",
+    "texto",
+    "textos",
+}
 
 
 class RAGService:
@@ -113,8 +140,20 @@ class RAGService:
         self.chunk_cache: list[dict] = []
         self.last_index_source = "startup"
         self.last_index_seconds = 0.0
+        self.response_mode = "extractive"
+        self.llm_model = ""
+        self.openai_client = self._build_openai_client()
         self._configure_embeddings()
         self.ensure_index_ready()
+
+    def _build_openai_client(self) -> OpenAI | None:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return None
+
+        self.response_mode = "generative-rag"
+        self.llm_model = LLM_MODEL
+        return OpenAI(api_key=api_key)
 
     def _configure_embeddings(self) -> None:
         try:
@@ -225,6 +264,8 @@ class RAGService:
             "index_source": self.last_index_source,
             "last_index_seconds": self.last_index_seconds,
             "embed_model": EMBED_MODEL,
+            "response_mode": self.response_mode,
+            "llm_model": self.llm_model,
         }
 
     def reindex(self) -> dict:
@@ -237,7 +278,7 @@ class RAGService:
             "last_index_seconds": self.last_index_seconds,
         }
 
-    def query(self, question: str) -> dict:
+    def query(self, question: str, history: list[dict] | None = None) -> dict:
         if self.retriever is None:
             raise RuntimeError("El indice aun no esta listo.")
 
@@ -288,7 +329,7 @@ class RAGService:
                 "sources": [],
             }
 
-        answer = self._compose_answer(question, evidence_blocks)
+        answer = self._compose_answer(question, evidence_blocks, history or [])
 
         return {
             "answer": answer,
@@ -383,41 +424,128 @@ class RAGService:
     def _node_file_name(self, metadata: dict) -> str:
         return metadata.get("file_name") or metadata.get("filename") or "Documento"
 
-    def _compose_answer(self, question: str, evidence_blocks: list[tuple[str, float, str]]) -> str:
+    def _compose_answer(
+        self,
+        question: str,
+        evidence_blocks: list[tuple[str, float, str]],
+        history: list[dict],
+    ) -> str:
+        if self.openai_client is not None:
+            generated_answer = self._generate_llm_answer(question, evidence_blocks, history)
+            if generated_answer:
+                return generated_answer
+
         keywords = self._extract_keywords(question)
-        selected_sentences: list[str] = []
+        insights = self._build_analysis_insights(evidence_blocks, keywords)
 
-        for file_name, score, text in evidence_blocks:
-            best_sentences = self._best_sentences_for_question(text, keywords)
-            for sentence in best_sentences[:2]:
-                candidate = f"- {sentence} [{file_name}, relevancia {score}]"
-                if candidate not in selected_sentences:
-                    selected_sentences.append(candidate)
-            if len(selected_sentences) >= 4:
-                break
-
-        if not selected_sentences:
+        if not insights:
+            fallback_points = []
             for file_name, score, text in evidence_blocks[:3]:
-                fallback_excerpt = text[:260].strip()
-                selected_sentences.append(
-                    f"- {fallback_excerpt} [{file_name}, relevancia {score}]"
+                snippet = self._fallback_snippet(text)
+                if not snippet:
+                    continue
+                fallback_points.append(f"- {snippet} [{file_name}, relevancia {score}]")
+
+            if not fallback_points:
+                return (
+                    "Encontre fragmentos relacionados, pero no suficiente contexto para elaborar "
+                    "una respuesta clara sin arriesgar una interpretacion incorrecta."
                 )
 
-        intro = (
-            "Encontre informacion relevante en los documentos cargados. "
-            "Con base unicamente en esos textos, esto es lo que pude identificar:"
+            return (
+                "Encontre informacion relacionada, pero el contenido recuperado es parcial. "
+                "Lo mas claro que aparece en los documentos es:\n\n"
+                + "\n".join(fallback_points)
+                + "\n\nSi quieres, puedo afinar la busqueda con una pregunta mas especifica."
+            )
+
+        overview = self._build_overview(question, insights, keywords)
+        topic_line = self._build_topic_line(insights, keywords)
+        answer_lines = [overview, "", "Hallazgos principales:"]
+
+        for insight in insights[:3]:
+            answer_lines.append(
+                f"- {insight['summary']} [{insight['file_name']}, relevancia {insight['score']}]"
+            )
+
+        if topic_line:
+            answer_lines.extend(["", topic_line])
+
+        answer_lines.extend(
+            [
+                "",
+                "La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
+            ]
         )
-        closing = (
-            "\n\nSi necesitas mas precision, prueba con una pregunta mas especifica "
-            "sobre una seccion, dato o documento concreto."
+        return "\n".join(answer_lines)
+
+    def _generate_llm_answer(
+        self,
+        question: str,
+        evidence_blocks: list[tuple[str, float, str]],
+        history: list[dict],
+    ) -> str:
+        evidence_text = self._format_evidence_for_llm(evidence_blocks)
+        conversation_text = self._format_history_for_llm(history)
+        prompt = (
+            "Responde en espanol como un asistente conversacional que analiza documentos.\n"
+            "Tu tarea es razonar sobre la evidencia recuperada y explicarla con claridad.\n"
+            "No copies frases largas del contexto. Sintetiza, conecta ideas y responde como un verdadero chatbot.\n"
+            "Debes usar solo la evidencia proporcionada. Si la evidencia no alcanza, dilo claramente.\n"
+            "No inventes datos ni cites paginas inexistentes.\n"
+            "Prefiere una respuesta natural en parrafos breves. Usa una lista solo si ayuda mucho.\n"
+            "\n"
+            "Historial reciente:\n"
+            f"{conversation_text}\n\n"
+            "Pregunta actual:\n"
+            f"{question}\n\n"
+            "Evidencia recuperada:\n"
+            f"{evidence_text}\n\n"
+            "Instrucciones de salida:\n"
+            "1. Responde de forma clara y directa.\n"
+            "2. Explica el sentido de la informacion, no la repitas literalmente.\n"
+            "3. Si hay varias ideas importantes, relacionarlas entre si.\n"
+            "4. Si notas limites o ambiguedades en la evidencia, mencialos al final en una frase breve.\n"
         )
-        return f"{intro}\n\n" + "\n".join(selected_sentences) + closing
+
+        try:
+            response = self.openai_client.responses.create(
+                model=self.llm_model,
+                input=prompt,
+            )
+        except Exception:
+            return ""
+
+        output_text = getattr(response, "output_text", "") or ""
+        return output_text.strip()
+
+    def _format_history_for_llm(self, history: list[dict]) -> str:
+        if not history:
+            return "Sin historial previo."
+
+        lines = []
+        for message in history[-6:]:
+            role = "Usuario" if message.get("role") == "user" else "Asistente"
+            content = " ".join(str(message.get("content", "")).split())
+            if not content:
+                continue
+            lines.append(f"{role}: {content}")
+
+        return "\n".join(lines) if lines else "Sin historial previo."
+
+    def _format_evidence_for_llm(self, evidence_blocks: list[tuple[str, float, str]]) -> str:
+        blocks = []
+        for index, (file_name, score, text) in enumerate(evidence_blocks[:4], start=1):
+            blocks.append(
+                f"[Fuente {index}] Documento: {file_name} | relevancia: {score}\n{text[:1400]}"
+            )
+        return "\n\n".join(blocks)
 
     def _best_sentences_for_question(self, text: str, keywords: set[str]) -> list[str]:
         sentences = [
-            sentence.strip()
+            self._clean_sentence(sentence)
             for sentence in re.split(r"(?<=[.!?])\s+|\n+", text)
-            if len(sentence.strip()) >= 40
+            if len(self._clean_sentence(sentence)) >= 40
         ]
 
         ranked = sorted(
@@ -435,6 +563,177 @@ class RAGService:
         tokens = self._normalize_tokens(sentence)
         overlap = len(tokens & keywords)
         return overlap, len(sentence)
+
+    def _build_analysis_insights(
+        self, evidence_blocks: list[tuple[str, float, str]], keywords: set[str]
+    ) -> list[dict]:
+        insights: list[dict] = []
+        seen = set()
+
+        for file_name, score, text in evidence_blocks:
+            best_sentences = self._best_sentences_for_question(text, keywords)
+            if not best_sentences:
+                continue
+
+            merged_summary = self._merge_sentences(best_sentences[:2], keywords)
+            summary = self._clean_summary(merged_summary)
+            if not summary:
+                continue
+
+            signature = self._normalize_text(summary)
+            if signature in seen:
+                continue
+
+            seen.add(signature)
+            insights.append(
+                {
+                    "summary": summary,
+                    "file_name": file_name,
+                    "score": score,
+                    "keywords": self._normalize_tokens(summary),
+                }
+            )
+
+        insights.sort(
+            key=lambda item: (
+                len(item["keywords"] & keywords),
+                item["score"],
+                len(item["summary"]),
+            ),
+            reverse=True,
+        )
+        return insights
+
+    def _merge_sentences(self, sentences: list[str], keywords: set[str]) -> str:
+        clauses: list[str] = []
+
+        for sentence in sentences:
+            clauses.extend(self._ranked_clauses(sentence, keywords))
+
+        unique_clauses = []
+        seen = set()
+        for clause in clauses:
+            signature = self._normalize_text(clause)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique_clauses.append(clause)
+            if len(unique_clauses) == 2:
+                break
+
+        if not unique_clauses:
+            return ""
+        if len(unique_clauses) == 1:
+            return self._to_analysis_sentence(unique_clauses[0])
+
+        first_clause = self._clause_to_fragment(unique_clauses[0], preserve_case=True)
+        second_clause = self._clause_to_fragment(unique_clauses[1], preserve_case=False)
+        return f"{self._ensure_sentence(first_clause)} Ademas, {second_clause}."
+
+    def _ranked_clauses(self, sentence: str, keywords: set[str]) -> list[str]:
+        raw_clauses = [
+            self._clean_sentence(part)
+            for part in re.split(r"[;:()]|,\s+(?:y|pero|aunque|mientras|donde)\s+", sentence)
+        ]
+        filtered_clauses = [clause for clause in raw_clauses if len(clause) >= 30]
+        ranked = sorted(
+            filtered_clauses,
+            key=lambda clause: self._sentence_score(clause, keywords),
+            reverse=True,
+        )
+        return ranked[:3]
+
+    def _to_analysis_sentence(self, clause: str) -> str:
+        fragment = self._clause_to_fragment(clause, preserve_case=False)
+        if not fragment:
+            return ""
+        return f"Los documentos indican que {fragment}."
+
+    def _clause_to_fragment(self, clause: str, preserve_case: bool) -> str:
+        fragment = self._clean_sentence(clause)
+        fragment = re.sub(
+            r"^(en\s+(?:los|las)\s+documentos?|los\s+documentos?|el\s+documento|segun\s+el\s+documento)\s+",
+            "",
+            fragment,
+            flags=re.IGNORECASE,
+        )
+        fragment = re.sub(r"\s+", " ", fragment).strip(" .,:;")
+        if not fragment:
+            return ""
+        if preserve_case:
+            return fragment
+        return fragment[:1].lower() + fragment[1:]
+
+    def _clean_summary(self, summary: str) -> str:
+        cleaned = self._clean_sentence(summary)
+        if len(cleaned) < 35:
+            return ""
+        return cleaned
+
+    def _build_overview(self, question: str, insights: list[dict], keywords: set[str]) -> str:
+        question_style = self._question_style(question)
+        primary_topics = self._collect_topics(insights, keywords)
+        topic_text = ", ".join(primary_topics[:3])
+
+        if question_style == "como":
+            base = "Al revisar los fragmentos mas relevantes, se describe principalmente como ocurre o se aplica el tema consultado"
+        elif question_style == "por_que":
+            base = "Los textos recuperados apuntan sobre todo a las causas o razones asociadas al tema consultado"
+        elif question_style == "cuales":
+            base = "Los documentos permiten identificar varios elementos concretos relacionados con tu pregunta"
+        else:
+            base = "A partir de los fragmentos recuperados, se puede responder de forma sintetizada"
+
+        if topic_text:
+            return f"{base}. Los temas que mas sostienen la respuesta son {topic_text}."
+        return f"{base}."
+
+    def _build_topic_line(self, insights: list[dict], keywords: set[str]) -> str:
+        topics = self._collect_topics(insights, keywords)
+        if not topics:
+            return ""
+        return "Temas recurrentes en la evidencia: " + ", ".join(topics[:5]) + "."
+
+    def _collect_topics(self, insights: list[dict], keywords: set[str]) -> list[str]:
+        frequencies: dict[str, int] = {}
+        for insight in insights:
+            for token in insight["keywords"]:
+                if token in keywords or token in GENERIC_TOPIC_WORDS or len(token) < 4:
+                    continue
+                frequencies[token] = frequencies.get(token, 0) + 1
+
+        ranked = sorted(frequencies.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        return [token for token, _ in ranked[:6]]
+
+    def _fallback_snippet(self, text: str) -> str:
+        cleaned = self._clean_sentence(text[:260])
+        if not cleaned:
+            return ""
+        return self._ensure_sentence(cleaned)
+
+    def _clean_sentence(self, text: str) -> str:
+        cleaned = " ".join(text.strip().split())
+        cleaned = re.sub(r"\[[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"\(\s*\)", "", cleaned)
+        return cleaned.strip()
+
+    def _ensure_sentence(self, text: str) -> str:
+        cleaned = text.strip()
+        if not cleaned:
+            return ""
+        if cleaned[-1] not in ".!?":
+            return f"{cleaned}."
+        return cleaned
+
+    def _question_style(self, question: str) -> str:
+        normalized = self._normalize_text(question)
+        if normalized.startswith("como"):
+            return "como"
+        if normalized.startswith("por que") or normalized.startswith("porque"):
+            return "por_que"
+        if normalized.startswith("cuales") or normalized.startswith("cual"):
+            return "cuales"
+        return "general"
 
     def _extract_keywords(self, question: str) -> set[str]:
         return self._normalize_tokens(question)

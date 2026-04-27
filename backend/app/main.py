@@ -70,7 +70,8 @@ def chat(payload: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=503, detail=startup_error or "Servicio no disponible")
 
     try:
-        result = rag_service.query(payload.question)
+        history = [message.model_dump() for message in payload.history]
+        result = rag_service.query(payload.question, history=history)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
