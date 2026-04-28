@@ -265,9 +265,29 @@ code {
   background: linear-gradient(135deg, #1e7068, #225178);
 }
 
-.bubble p {
+.formatted-paragraph {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.formatted-paragraph + .formatted-paragraph,
+.formatted-paragraph + .formatted-list,
+.formatted-list + .formatted-paragraph,
+.formatted-list + .formatted-list {
+  margin-top: 0.9rem;
+}
+
+.formatted-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.formatted-list li + li {
+  margin-top: 0.7rem;
+}
+
+.bubble strong {
+  font-weight: 800;
 }
 
 .bubble-loading {

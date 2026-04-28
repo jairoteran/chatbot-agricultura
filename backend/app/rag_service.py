@@ -17,12 +17,14 @@ from llama_index.core import (
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.node_parser import SentenceSplitter
+from google import genai
 from openai import OpenAI
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 TOP_K = 5
 SIMILARITY_THRESHOLD = 0.35
 REQUIRED_STORAGE_FILES = (
@@ -130,6 +132,24 @@ GENERIC_TOPIC_WORDS = {
     "texto",
     "textos",
 }
+SMALL_TALK_PATTERNS = [
+    (
+        re.compile(r"^(hola|buenas|buenos dias|buen dia|buenas tardes|buenas noches)[!. ]*$", re.IGNORECASE),
+        "Hola. Estoy listo para ayudarte con tus documentos. Puedes preguntarme por cultivos, practicas, recomendaciones o pedir un resumen claro de lo que dicen los textos.",
+    ),
+    (
+        re.compile(r"^(como estas|como te encuentras|que tal|como vas)[?!. ]*$", re.IGNORECASE),
+        "Estoy bien y listo para ayudarte. Si quieres, puedes hacerme una pregunta sobre los documentos o pedirme que te explique un tema de forma mas clara y ordenada.",
+    ),
+    (
+        re.compile(r"^(gracias|muchas gracias)[!. ]*$", re.IGNORECASE),
+        "Con gusto. Si quieres, seguimos con otra pregunta o con un resumen mas claro sobre algun tema de los documentos.",
+    ),
+    (
+        re.compile(r"^(quien eres|que eres|que puedes hacer)[?!. ]*$", re.IGNORECASE),
+        "Soy un asistente documental. Puedo revisar la informacion de tus PDFs, resumirla, explicarla de forma clara y ayudarte a encontrar ideas importantes sin copiar el texto tal cual.",
+    ),
+]
 
 
 class RAGService:
@@ -141,19 +161,29 @@ class RAGService:
         self.last_index_source = "startup"
         self.last_index_seconds = 0.0
         self.response_mode = "extractive"
+        self.llm_provider = ""
         self.llm_model = ""
-        self.openai_client = self._build_openai_client()
+        self.gemini_client = None
+        self.openai_client = None
+        self._configure_llm_client()
         self._configure_embeddings()
         self.ensure_index_ready()
 
-    def _build_openai_client(self) -> OpenAI | None:
+    def _configure_llm_client(self) -> None:
+        gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        if not api_key:
-            return None
+        if gemini_api_key:
+            self.gemini_client = genai.Client(api_key=gemini_api_key)
+            self.response_mode = "generative-rag"
+            self.llm_provider = "gemini"
+            self.llm_model = GEMINI_MODEL
+            return
 
-        self.response_mode = "generative-rag"
-        self.llm_model = LLM_MODEL
-        return OpenAI(api_key=api_key)
+        if api_key:
+            self.openai_client = OpenAI(api_key=api_key)
+            self.response_mode = "generative-rag"
+            self.llm_provider = "openai"
+            self.llm_model = OPENAI_MODEL
 
     def _configure_embeddings(self) -> None:
         try:
@@ -265,6 +295,7 @@ class RAGService:
             "last_index_seconds": self.last_index_seconds,
             "embed_model": EMBED_MODEL,
             "response_mode": self.response_mode,
+            "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
         }
 
@@ -281,6 +312,14 @@ class RAGService:
     def query(self, question: str, history: list[dict] | None = None) -> dict:
         if self.retriever is None:
             raise RuntimeError("El indice aun no esta listo.")
+
+        small_talk_answer = self._small_talk_answer(question)
+        if small_talk_answer:
+            return {
+                "answer": small_talk_answer,
+                "found": True,
+                "sources": [],
+            }
 
         keywords = self._extract_keywords(question)
         vector_candidates = self._vector_candidates(question, keywords)
@@ -336,6 +375,13 @@ class RAGService:
             "found": True,
             "sources": source_chunks,
         }
+
+    def _small_talk_answer(self, question: str) -> str:
+        normalized_question = " ".join(question.strip().split())
+        for pattern, answer in SMALL_TALK_PATTERNS:
+            if pattern.match(normalized_question):
+                return answer
+        return ""
 
     def _vector_candidates(self, question: str, keywords: set[str]) -> list[dict]:
         ranked_nodes = []
@@ -430,7 +476,7 @@ class RAGService:
         evidence_blocks: list[tuple[str, float, str]],
         history: list[dict],
     ) -> str:
-        if self.openai_client is not None:
+        if self.gemini_client is not None or self.openai_client is not None:
             generated_answer = self._generate_llm_answer(question, evidence_blocks, history)
             if generated_answer:
                 return generated_answer
@@ -453,15 +499,16 @@ class RAGService:
                 )
 
             return (
-                "Encontre informacion relacionada, pero el contenido recuperado es parcial. "
-                "Lo mas claro que aparece en los documentos es:\n\n"
+                "**Respuesta breve:** Encontre informacion relacionada, pero el contenido recuperado es parcial.\n\n"
+                "**Puntos rescatables:**\n"
                 + "\n".join(fallback_points)
-                + "\n\nSi quieres, puedo afinar la busqueda con una pregunta mas especifica."
+                + "\n\n**Observacion:** Si quieres, puedo afinar la busqueda con una pregunta mas especifica."
             )
 
         overview = self._build_overview(question, insights, keywords)
         topic_line = self._build_topic_line(insights, keywords)
-        answer_lines = [overview, "", "Hallazgos principales:"]
+        conclusion = self._build_conclusion(question, insights, keywords)
+        answer_lines = ["**Respuesta breve:**", overview, "", "**Puntos clave:**"]
 
         for insight in insights[:3]:
             answer_lines.append(
@@ -469,12 +516,15 @@ class RAGService:
             )
 
         if topic_line:
-            answer_lines.extend(["", topic_line])
+            answer_lines.extend(["", f"**Temas relacionados:** {topic_line}"])
+
+        if conclusion:
+            answer_lines.extend(["", f"**Conclusion:** {conclusion}"])
 
         answer_lines.extend(
             [
                 "",
-                "La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
+                "**Nota:** La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
             ]
         )
         return "\n".join(answer_lines)
@@ -493,7 +543,7 @@ class RAGService:
             "No copies frases largas del contexto. Sintetiza, conecta ideas y responde como un verdadero chatbot.\n"
             "Debes usar solo la evidencia proporcionada. Si la evidencia no alcanza, dilo claramente.\n"
             "No inventes datos ni cites paginas inexistentes.\n"
-            "Prefiere una respuesta natural en parrafos breves. Usa una lista solo si ayuda mucho.\n"
+            "Prefiere una respuesta natural y organizada.\n"
             "\n"
             "Historial reciente:\n"
             f"{conversation_text}\n\n"
@@ -504,15 +554,21 @@ class RAGService:
             "Instrucciones de salida:\n"
             "1. Responde de forma clara y directa.\n"
             "2. Explica el sentido de la informacion, no la repitas literalmente.\n"
-            "3. Si hay varias ideas importantes, relacionarlas entre si.\n"
-            "4. Si notas limites o ambiguedades en la evidencia, mencialos al final en una frase breve.\n"
+            "3. Organiza la respuesta con estas secciones cuando aporten claridad: **Respuesta breve**, **Puntos clave**, **Conclusion**.\n"
+            "4. Usa listas con guiones si enumeras ideas.\n"
+            "5. Si notas limites o ambiguedades en la evidencia, mencialos al final en una frase breve bajo **Nota**.\n"
         )
 
         try:
-            response = self.openai_client.responses.create(
-                model=self.llm_model,
-                input=prompt,
-            )
+            if self.gemini_client is not None:
+                response = self.gemini_client.models.generate_content(
+                    model=self.llm_model,
+                    contents=prompt,
+                )
+                output_text = getattr(response, "text", "") or ""
+                return output_text.strip()
+
+            response = self.openai_client.responses.create(model=self.llm_model, input=prompt)
         except Exception:
             return ""
 
@@ -692,7 +748,20 @@ class RAGService:
         topics = self._collect_topics(insights, keywords)
         if not topics:
             return ""
-        return "Temas recurrentes en la evidencia: " + ", ".join(topics[:5]) + "."
+        return ", ".join(topics[:5]) + "."
+
+    def _build_conclusion(self, question: str, insights: list[dict], keywords: set[str]) -> str:
+        if not insights:
+            return ""
+
+        dominant_topics = self._collect_topics(insights, keywords)
+        top_summary = insights[0]["summary"]
+        if dominant_topics:
+            return (
+                f"En conjunto, la evidencia sugiere que el tema se entiende mejor si se consideran especialmente {', '.join(dominant_topics[:3])}, "
+                f"y que {self._lowercase_first(top_summary)}"
+            )
+        return self._ensure_sentence(top_summary)
 
     def _collect_topics(self, insights: list[dict], keywords: set[str]) -> list[str]:
         frequencies: dict[str, int] = {}
@@ -724,6 +793,12 @@ class RAGService:
         if cleaned[-1] not in ".!?":
             return f"{cleaned}."
         return cleaned
+
+    def _lowercase_first(self, text: str) -> str:
+        cleaned = text.strip()
+        if not cleaned:
+            return ""
+        return cleaned[:1].lower() + cleaned[1:]
 
     def _question_style(self, question: str) -> str:
         normalized = self._normalize_text(question)

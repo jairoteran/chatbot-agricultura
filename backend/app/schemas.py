@@ -33,6 +33,7 @@ class HealthResponse(BaseModel):
     last_index_seconds: float = 0.0
     embed_model: str = ""
     response_mode: str = "extractive"
+    llm_provider: str = ""
     llm_model: str = ""
 
 

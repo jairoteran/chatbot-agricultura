@@ -1,8 +1,14 @@
+from pathlib import Path
+import threading
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from app.rag_service import RAGService
 from app.schemas import ChatRequest, ChatResponse, HealthResponse, ReindexResponse
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 app = FastAPI(title="PDF Chat API", version="1.1.0")
 
@@ -16,6 +22,8 @@ app.add_middleware(
 
 rag_service: RAGService | None = None
 startup_error: str | None = None
+init_lock = threading.Lock()
+init_thread: threading.Thread | None = None
 
 
 def initialize_service(force_rebuild: bool = False) -> None:
@@ -32,15 +40,36 @@ def initialize_service(force_rebuild: bool = False) -> None:
         startup_error = str(exc)
 
 
-initialize_service()
+def ensure_service_initializing(force_rebuild: bool = False) -> None:
+    global init_thread
+
+    if rag_service is not None and not force_rebuild:
+        return
+
+    with init_lock:
+        if init_thread is not None and init_thread.is_alive():
+            return
+
+        init_thread = threading.Thread(
+            target=initialize_service,
+            kwargs={"force_rebuild": force_rebuild},
+            daemon=True,
+        )
+        init_thread.start()
+
+
+@app.on_event("startup")
+def startup_event() -> None:
+    ensure_service_initializing(force_rebuild=False)
 
 
 @app.get("/health", response_model=HealthResponse)
 def healthcheck() -> HealthResponse:
     if rag_service is None:
+        ensure_service_initializing(force_rebuild=False)
         return HealthResponse(
-            status="error",
-            detail=startup_error or "Servicio no disponible",
+            status="checking" if startup_error is None else "error",
+            detail=startup_error or "Inicializando servicio, cargando embeddings e indice documental...",
             indexed_files=[],
             indexed_file_count=0,
             index_ready=False,
@@ -52,9 +81,11 @@ def healthcheck() -> HealthResponse:
 @app.post("/reindex", response_model=ReindexResponse)
 def reindex() -> ReindexResponse:
     if rag_service is None:
-        initialize_service(force_rebuild=False)
-        if rag_service is None:
-            raise HTTPException(status_code=503, detail=startup_error)
+        ensure_service_initializing(force_rebuild=False)
+        raise HTTPException(
+            status_code=503,
+            detail=startup_error or "El servicio aun se esta inicializando. Intenta de nuevo en unos segundos.",
+        )
 
     try:
         result = rag_service.reindex()
@@ -67,7 +98,11 @@ def reindex() -> ReindexResponse:
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest) -> ChatResponse:
     if rag_service is None:
-        raise HTTPException(status_code=503, detail=startup_error or "Servicio no disponible")
+        ensure_service_initializing(force_rebuild=False)
+        raise HTTPException(
+            status_code=503,
+            detail=startup_error or "El servicio aun se esta inicializando. Espera a que /health indique que esta listo.",
+        )
 
     try:
         history = [message.model_dump() for message in payload.history]

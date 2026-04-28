@@ -7,3 +7,5 @@ sentence-transformers>=2.7.0
 pypdf>=4.2.0
 cryptography>=42.0.0
 openai>=1.0.0
+google-genai>=1.0.0
+python-dotenv>=1.0.1

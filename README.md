@@ -38,7 +38,25 @@ pip install -r requirements.txt
 
 Si quieres que el asistente razone y redacte como un chatbot real, configura una clave de API en el backend.
 
-### Opcion actual del proyecto: OpenAI
+### Opcion recomendada para pruebas gratis: Gemini
+
+El backend ahora prioriza `Gemini` si encuentra `GEMINI_API_KEY`. Si no encuentra esa variable, intenta usar `OpenAI`. Si no encuentra ninguna, responde con el modo local basico.
+
+El backend carga automaticamente variables desde `backend/.env`, y ese archivo ya esta ignorado por Git para no exponer claves.
+
+```powershell
+$env:GEMINI_API_KEY="tu_clave"
+```
+
+Opcionalmente puedes elegir el modelo:
+
+```powershell
+$env:GEMINI_MODEL="gemini-2.5-flash"
+```
+
+Segun la documentacion oficial de Google revisada el `28 de abril de 2026`, Gemini API ofrece un nivel `free` y un nivel `pay-as-you-go`, con cuotas y modelos que dependen del proyecto y del modelo usado.
+
+### Opcion alternativa: OpenAI
 
 ```powershell
 $env:OPENAI_API_KEY="tu_clave"
@@ -50,7 +68,7 @@ Opcionalmente puedes elegir el modelo:
 $env:OPENAI_MODEL="gpt-5.4-mini"
 ```
 
-Si no defines `OPENAI_API_KEY`, la aplicacion seguira respondiendo con un modo basico basado en recuperacion y sintesis local.
+Si no defines ni `GEMINI_API_KEY` ni `OPENAI_API_KEY`, la aplicacion seguira respondiendo con un modo basico basado en recuperacion y sintesis local.
 
 ### 4. Agregar PDFs
 
@@ -132,7 +150,7 @@ Si prefieres ejecutarlos en segundo plano dentro de la misma sesion:
 4. El frontend muestra el estado del backend, las fuentes usadas y un boton de reindexado.
 5. Si no hay evidencia suficiente, el sistema responde claramente que no encontro informacion suficiente.
 6. Las respuestas del chat priorizan sintesis y analisis de los fragmentos recuperados antes que copiar texto del documento.
-7. Si se configura una API key de OpenAI, el backend puede usar un modelo generativo para responder con continuidad conversacional y mejor razonamiento.
+7. Si se configura una API key de Gemini o OpenAI, el backend puede usar un modelo generativo para responder con continuidad conversacional y mejor razonamiento.
 
 ## Sobre el "entrenamiento"
 
@@ -155,7 +173,23 @@ En otras palabras, aunque tengas Plus, para que este proyecto use un modelo gene
 
 ## Opciones de proveedor
 
-### 1. OpenAI
+### 1. Google Gemini
+
+Ventajas:
+
+- es la opcion mas conveniente para probar sin pagar al inicio;
+- el backend ya puede usarlo directamente;
+- tiene free tier oficial segun el proyecto y el modelo.
+
+Desventaja:
+
+- las cuotas gratis tienen limites y pueden variar segun el modelo.
+
+Modelo recomendado para empezar:
+
+- `gemini-2.5-flash`
+
+### 2. OpenAI
 
 Ventajas:
 
@@ -171,7 +205,7 @@ Modelo recomendado para este proyecto:
 
 - `gpt-5.4-mini`
 
-### 2. Anthropic / Claude
+### 3. Anthropic / Claude
 
 Ventajas:
 
@@ -188,24 +222,12 @@ Opciones razonables:
 - `Claude Haiku 3.5` si buscas abaratar;
 - `Claude Sonnet 4` si priorizas calidad por encima del costo.
 
-### 3. Google Gemini
-
-Ventajas:
-
-- es la mejor opcion para hacer pruebas sin gastar al inicio;
-- tiene free tier segun el modelo;
-- tambien puede ser muy barato incluso en pago por uso.
-
-Desventaja:
-
-- requeriria adaptar el backend, porque hoy el proyecto esta preparado para OpenAI.
-
 ## Cual conviene usar
 
 Si el objetivo es subir el proyecto y dejarlo listo para mostrar:
 
-- usa `OpenAI` si quieres la integracion mas directa y una experiencia de chatbot convincente;
 - usa `Gemini` si quieres hacer pruebas gratis o con el menor gasto posible;
+- usa `OpenAI` si quieres una alternativa estable con buena calidad y costo razonable;
 - usa `Claude` si ya decidiste pagar y prefieres ese proveedor por estilo de respuesta.
 
 ## Opcion para pruebas
@@ -231,9 +253,9 @@ Si cada consulta envia contexto del documento y recibe una respuesta corta o med
 
 Para dejar el proyecto listo para subir:
 
-1. Mantener `OpenAI` como integracion principal porque ya esta conectada al backend.
-2. Usar `gpt-5.4-mini` como modelo por defecto para controlar el gasto.
-3. Mencionar en la documentacion que `Gemini` es la mejor alternativa si luego se quiere una version con pruebas gratis.
+1. Usar `Gemini` como opcion principal para pruebas porque ya esta integrado en el backend y puede aprovechar el free tier.
+2. Usar `Gemini` como primera opcion para pruebas y validacion inicial.
+3. Mantener `OpenAI` como respaldo opcional cuando quieras comparar calidad o comportamiento.
 
 ## Nota importante
 
@@ -245,7 +267,7 @@ Si el chat muestra un error de conexion o el backend responde que no esta listo,
 
 ## Fuentes consultadas
 
-Documentacion oficial revisada el `26 de abril de 2026`:
+Documentacion oficial revisada entre el `26 de abril de 2026` y el `28 de abril de 2026`:
 
 - OpenAI API pricing: `https://openai.com/api/pricing/`
 - OpenAI help sobre API: `https://help.openai.com/en/articles/4936851-how-do-i-start-exploring-the-openai-api`

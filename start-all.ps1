@@ -26,7 +26,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "npm no esta disponible en esta terminal. Instala Node.js antes de ejecutar este script."
 }
 
-$backendCommand = "& '.\.venv\Scripts\python.exe' -m uvicorn app.main:app --reload --port 8000"
+$backendCommand = "& '.\.venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
 $frontendCommand = "npm run dev"
 
 Write-Host "Iniciando backend en http://localhost:8000 ..."

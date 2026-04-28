@@ -15,6 +15,62 @@ function documentCountLabel(count) {
   return `${count} documento${count === 1 ? "" : "s"} cargado${count === 1 ? "" : "s"}`;
 }
 
+function renderInlineFormatting(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`strong-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={`text-${index}`}>{part}</span>;
+  });
+}
+
+function renderMessageContent(content) {
+  const lines = content.split("\n");
+  const elements = [];
+  let bulletItems = [];
+  let key = 0;
+
+  function flushBullets() {
+    if (bulletItems.length === 0) {
+      return;
+    }
+
+    elements.push(
+      <ul key={`list-${key++}`} className="formatted-list">
+        {bulletItems.map((item, index) => (
+          <li key={`bullet-${index}`}>{renderInlineFormatting(item)}</li>
+        ))}
+      </ul>,
+    );
+    bulletItems = [];
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushBullets();
+      continue;
+    }
+
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      bulletItems.push(line.slice(2).trim());
+      continue;
+    }
+
+    flushBullets();
+    elements.push(
+      <p key={`paragraph-${key++}`} className="formatted-paragraph">
+        {renderInlineFormatting(line)}
+      </p>,
+    );
+  }
+
+  flushBullets();
+  return elements;
+}
+
 function App() {
   const [messages, setMessages] = useState([initialMessage]);
   const [input, setInput] = useState("");
@@ -30,6 +86,7 @@ function App() {
     last_index_seconds: 0,
     embed_model: "",
     response_mode: "extractive",
+    llm_provider: "",
     llm_model: "",
   });
   const endRef = useRef(null);
@@ -79,6 +136,7 @@ function App() {
           last_index_seconds: 0,
           embed_model: "",
           response_mode: "extractive",
+          llm_provider: "",
           llm_model: "",
         });
       }
@@ -219,9 +277,15 @@ function App() {
       : backendStatus.index_source === "rebuild"
         ? "Indice reconstruido desde PDFs"
         : "Inicializando indice";
+  const backendStatusLabel =
+    backendStatus.status === "checking"
+      ? "Inicializando backend"
+      : backendReady
+        ? "Backend listo"
+        : "Backend no listo";
   const responseModeLabel =
     backendStatus.response_mode === "generative-rag"
-      ? `Modo conversacional con ${backendStatus.llm_model || "LLM"}`
+      ? `Modo conversacional con ${backendStatus.llm_provider || "LLM"}: ${backendStatus.llm_model || "modelo no indicado"}`
       : "Modo basico sin modelo generativo";
 
   return (
@@ -241,7 +305,7 @@ function App() {
         <div className="status-panel">
           <div className={`status-pill status-${backendStatus.status}`}>
             <span className="dot" />
-            {backendReady ? "Backend listo" : "Backend no listo"}
+            {backendStatusLabel}
           </div>
           <p className="status-copy">{backendStatus.detail}</p>
           <p className="status-meta">
@@ -291,7 +355,7 @@ function App() {
                 </div>
                 <div className="bubble-stack">
                   <div className="bubble">
-                    <p>{message.content}</p>
+                    {renderMessageContent(message.content)}
                   </div>
                   {message.role === "assistant" && message.sources?.length > 0 && (
                     <div className="sources-panel">
@@ -331,11 +395,11 @@ function App() {
             onKeyDown={handleKeyDown}
             placeholder="Escribe tu pregunta sobre los documentos..."
             rows={1}
-            disabled={!backendReady && backendStatus.status !== "checking"}
+            disabled={!backendReady}
           />
           <button
             type="submit"
-            disabled={isLoading || !input.trim() || (!backendReady && backendStatus.status !== "checking")}
+            disabled={isLoading || !input.trim() || !backendReady}
           >
             Enviar
           </button>
