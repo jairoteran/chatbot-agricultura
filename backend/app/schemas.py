@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+RESPONSE_STYLE_PATTERN = "^(academico|simple|tecnico)$"
+
 
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
@@ -9,10 +11,16 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=3, description="Pregunta del usuario")
     history: list[ChatMessage] = Field(default_factory=list, max_length=12)
+    response_style: str = Field(
+        default="academico",
+        pattern=RESPONSE_STYLE_PATTERN,
+        description="Estilo de respuesta: academico, simple o tecnico",
+    )
 
 
 class SourceChunk(BaseModel):
     file_name: str
+    page_label: str = ""
     score: float
     text: str
 
@@ -35,6 +43,8 @@ class HealthResponse(BaseModel):
     response_mode: str = "extractive"
     llm_provider: str = ""
     llm_model: str = ""
+    deployment_mode: str = "local"
+    allow_reindex: bool = True
 
 
 class ReindexResponse(BaseModel):
@@ -43,3 +53,19 @@ class ReindexResponse(BaseModel):
     indexed_files: list[str] = Field(default_factory=list)
     index_source: str = "rebuild"
     last_index_seconds: float = 0.0
+
+
+class DocumentSummaryRequest(BaseModel):
+    file_name: str = Field(..., min_length=1, description="Nombre del documento")
+    response_style: str = Field(
+        default="academico",
+        pattern=RESPONSE_STYLE_PATTERN,
+        description="Estilo de resumen: academico, simple o tecnico",
+    )
+
+
+class DocumentSummaryResponse(BaseModel):
+    file_name: str
+    answer: str
+    found: bool
+    sources: list[SourceChunk] = Field(default_factory=list)

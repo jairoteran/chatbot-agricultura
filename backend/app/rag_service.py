@@ -150,6 +150,44 @@ SMALL_TALK_PATTERNS = [
         "Soy un asistente documental. Puedo revisar la informacion de tus PDFs, resumirla, explicarla de forma clara y ayudarte a encontrar ideas importantes sin copiar el texto tal cual.",
     ),
 ]
+RESPONSE_STYLE_GUIDANCE = {
+    "academico": {
+        "label": "Academico",
+        "sections": ("**Respuesta breve:**", "**Puntos clave:**", "**Conclusion:**", "**Nota:**"),
+        "related_label": "**Temas relacionados:**",
+        "fallback_points_label": "**Puntos rescatables:**",
+        "summary_instruction": (
+            "Redacta como si fuera un apoyo para tesis o informe academico, con tono formal y relaciones claras entre ideas."
+        ),
+        "llm_instruction": (
+            "Usa un tono academico claro y ordenado. Prioriza precision, sintesis y redaccion apta para tesis o trabajos formales."
+        ),
+    },
+    "simple": {
+        "label": "Simple",
+        "sections": ("**Explicacion breve:**", "**Ideas principales:**", "**En resumen:**", "**Aclaracion:**"),
+        "related_label": "**Conceptos utiles:**",
+        "fallback_points_label": "**Lo mas importante:**",
+        "summary_instruction": (
+            "Explica como si hablaras con alguien que no conoce el tema. Prioriza claridad, ejemplos breves y lenguaje cotidiano."
+        ),
+        "llm_instruction": (
+            "Usa un tono sencillo y cercano. Explica con palabras faciles, evita tecnicismos innecesarios y busca que cualquier persona lo entienda."
+        ),
+    },
+    "tecnico": {
+        "label": "Tecnico",
+        "sections": ("**Sintesis tecnica:**", "**Hallazgos tecnicos:**", "**Interpretacion tecnica:**", "**Observacion tecnica:**"),
+        "related_label": "**Variables y conceptos:**",
+        "fallback_points_label": "**Hallazgos rescatables:**",
+        "summary_instruction": (
+            "Resume con enfoque tecnico, resaltando procedimiento, condiciones, criterios y relaciones operativas."
+        ),
+        "llm_instruction": (
+            "Usa un tono tecnico y preciso. Conserva la terminologia relevante del dominio y enfatiza procedimientos, criterios y relaciones causales."
+        ),
+    },
+}
 
 
 class RAGService:
@@ -163,6 +201,10 @@ class RAGService:
         self.response_mode = "extractive"
         self.llm_provider = ""
         self.llm_model = ""
+        self.deployment_mode = "vercel" if os.getenv("VERCEL") == "1" else "local"
+        self.allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower() in {"1", "true", "yes"}
+        if self.deployment_mode == "local" and not os.getenv("ALLOW_RUNTIME_REINDEX"):
+            self.allow_reindex = True
         self.gemini_client = None
         self.openai_client = None
         self._configure_llm_client()
@@ -220,6 +262,12 @@ class RAGService:
             self.chunk_cache = json.loads(CHUNK_CACHE_FILE.read_text(encoding="utf-8"))
             self.last_index_source = "storage"
             return load_index_from_storage(storage_context)
+
+        if self.deployment_mode != "local" and not self.allow_reindex:
+            raise RuntimeError(
+                "No se encontro un indice persistido utilizable para este despliegue. "
+                "En Vercel debes incluir backend/storage actualizado en el repositorio o habilitar ALLOW_RUNTIME_REINDEX."
+            )
 
         splitter = SentenceSplitter(chunk_size=700, chunk_overlap=120)
         nodes = splitter.get_nodes_from_documents(documents)
@@ -297,9 +345,17 @@ class RAGService:
             "response_mode": self.response_mode,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
+            "deployment_mode": self.deployment_mode,
+            "allow_reindex": self.allow_reindex,
         }
 
     def reindex(self) -> dict:
+        if not self.allow_reindex:
+            raise RuntimeError(
+                "La reindexacion en tiempo de ejecucion esta deshabilitada en este despliegue. "
+                "Reconstruye el indice antes de desplegar o habilita ALLOW_RUNTIME_REINDEX."
+            )
+
         self.ensure_index_ready(force_rebuild=True)
         return {
             "status": "ok",
@@ -309,7 +365,12 @@ class RAGService:
             "last_index_seconds": self.last_index_seconds,
         }
 
-    def query(self, question: str, history: list[dict] | None = None) -> dict:
+    def query(
+        self,
+        question: str,
+        history: list[dict] | None = None,
+        response_style: str = "academico",
+    ) -> dict:
         if self.retriever is None:
             raise RuntimeError("El indice aun no esta listo.")
 
@@ -345,6 +406,7 @@ class RAGService:
 
         for item in filtered_nodes[:4]:
             file_name = item["file_name"]
+            page_label = item.get("page_label", "")
             normalized_text = item["text"]
             excerpt = normalized_text[:650]
             score = item["score"]
@@ -352,11 +414,12 @@ class RAGService:
             source_chunks.append(
                 {
                     "file_name": file_name,
+                    "page_label": page_label,
                     "score": score,
                     "text": excerpt,
                 }
             )
-            evidence_blocks.append((file_name, score, normalized_text))
+            evidence_blocks.append((file_name, page_label, score, normalized_text))
 
         if not any(item["keyword_overlap"] > 0 for item in filtered_nodes):
             return {
@@ -368,12 +431,66 @@ class RAGService:
                 "sources": [],
             }
 
-        answer = self._compose_answer(question, evidence_blocks, history or [])
+        answer = self._compose_answer(
+            question,
+            evidence_blocks,
+            history or [],
+            response_style=response_style,
+        )
 
         return {
             "answer": answer,
             "found": True,
             "sources": source_chunks,
+        }
+
+    def summarize_document(self, file_name: str, response_style: str = "academico") -> dict:
+        matching_chunks = [
+            chunk for chunk in self.chunk_cache if chunk["file_name"].strip().lower() == file_name.strip().lower()
+        ]
+        if not matching_chunks:
+            raise ValueError(f"No se encontro un documento llamado '{file_name}'.")
+
+        selected_chunks = self._select_summary_chunks(matching_chunks)
+        sources = [
+            {
+                "file_name": chunk["file_name"],
+                "page_label": chunk.get("page_label", ""),
+                "score": 1.0,
+                "text": chunk["text"][:650],
+            }
+            for chunk in selected_chunks[:4]
+        ]
+        evidence_blocks = [
+            (
+                chunk["file_name"],
+                chunk.get("page_label", ""),
+                1.0,
+                chunk["text"],
+            )
+            for chunk in selected_chunks[:5]
+        ]
+
+        style_config = self._style_config(response_style)
+        prompt = (
+            f"Resume el documento '{selected_chunks[0]['file_name']}' de forma organizada.\n"
+            "Debes escribir en espanol, sin copiar el texto literalmente.\n"
+            f"{style_config['summary_instruction']}\n"
+            "Organiza la respuesta con estas secciones cuando aporten claridad: **Resumen**, **Ideas clave**, **Conclusion**.\n"
+            "Usa listas con guiones para las ideas clave.\n"
+            "Si puedes, menciona de forma breve las paginas mas utiles al final bajo **Referencias**.\n"
+        )
+        answer = self._compose_answer(
+            prompt,
+            evidence_blocks,
+            history=[],
+            response_style=response_style,
+        )
+        return {
+            "file_name": selected_chunks[0]["file_name"],
+            "answer": answer,
+            "found": True,
+            "sources": sources,
         }
 
     def _small_talk_answer(self, question: str) -> str:
@@ -394,6 +511,7 @@ class RAGService:
             ranked_nodes.append(
                 {
                     "file_name": self._node_file_name(node.metadata or {}),
+                    "page_label": self._node_page_label(node.metadata or {}),
                     "text": normalized_text,
                     "keyword_overlap": len(self._normalize_tokens(normalized_text) & keywords),
                     "score": round(float(node.score), 4),
@@ -416,6 +534,7 @@ class RAGService:
             candidates.append(
                 {
                     "file_name": chunk["file_name"],
+                    "page_label": chunk.get("page_label", ""),
                     "text": chunk["text"],
                     "keyword_overlap": overlap,
                     "score": round(min(0.99, 0.2 + overlap * 0.12), 4),
@@ -432,7 +551,7 @@ class RAGService:
         merged: dict[tuple[str, str], dict] = {}
 
         for candidate in [*vector_candidates, *lexical_candidates]:
-            key = (candidate["file_name"], candidate["text"][:220])
+            key = (candidate["file_name"], candidate.get("page_label", ""), candidate["text"][:220])
             current = merged.get(key)
             if current is None:
                 merged[key] = candidate
@@ -460,6 +579,7 @@ class RAGService:
             serialized.append(
                 {
                     "file_name": self._node_file_name(metadata),
+                    "page_label": self._node_page_label(metadata),
                     "text": text,
                     "tokens": sorted(self._normalize_tokens(text)),
                 }
@@ -470,14 +590,24 @@ class RAGService:
     def _node_file_name(self, metadata: dict) -> str:
         return metadata.get("file_name") or metadata.get("filename") or "Documento"
 
+    def _node_page_label(self, metadata: dict) -> str:
+        return str(metadata.get("page_label") or metadata.get("page") or "")
+
     def _compose_answer(
         self,
         question: str,
-        evidence_blocks: list[tuple[str, float, str]],
+        evidence_blocks: list[tuple[str, str, float, str]],
         history: list[dict],
+        response_style: str = "academico",
     ) -> str:
+        style_config = self._style_config(response_style)
         if self.gemini_client is not None or self.openai_client is not None:
-            generated_answer = self._generate_llm_answer(question, evidence_blocks, history)
+            generated_answer = self._generate_llm_answer(
+                question,
+                evidence_blocks,
+                history,
+                response_style=response_style,
+            )
             if generated_answer:
                 return generated_answer
 
@@ -486,11 +616,11 @@ class RAGService:
 
         if not insights:
             fallback_points = []
-            for file_name, score, text in evidence_blocks[:3]:
+            for file_name, page_label, score, text in evidence_blocks[:3]:
                 snippet = self._fallback_snippet(text)
                 if not snippet:
                     continue
-                fallback_points.append(f"- {snippet} [{file_name}, relevancia {score}]")
+                fallback_points.append(f"- {snippet} [{self._source_reference(file_name, page_label, score)}]")
 
             if not fallback_points:
                 return (
@@ -499,32 +629,33 @@ class RAGService:
                 )
 
             return (
-                "**Respuesta breve:** Encontre informacion relacionada, pero el contenido recuperado es parcial.\n\n"
-                "**Puntos rescatables:**\n"
+                f"{style_config['sections'][0]} Encontre informacion relacionada, pero el contenido recuperado es parcial.\n\n"
+                f"{style_config['fallback_points_label']}\n"
                 + "\n".join(fallback_points)
-                + "\n\n**Observacion:** Si quieres, puedo afinar la busqueda con una pregunta mas especifica."
+                + f"\n\n{style_config['sections'][3]} Si quieres, puedo afinar la busqueda con una pregunta mas especifica."
             )
 
-        overview = self._build_overview(question, insights, keywords)
+        overview = self._build_overview(question, insights, keywords, response_style)
         topic_line = self._build_topic_line(insights, keywords)
-        conclusion = self._build_conclusion(question, insights, keywords)
-        answer_lines = ["**Respuesta breve:**", overview, "", "**Puntos clave:**"]
+        conclusion = self._build_conclusion(question, insights, keywords, response_style)
+        answer_lines = [style_config["sections"][0], overview, "", style_config["sections"][1]]
 
         for insight in insights[:3]:
             answer_lines.append(
-                f"- {insight['summary']} [{insight['file_name']}, relevancia {insight['score']}]"
+                f"- {self._format_insight_summary(insight['summary'], response_style)} "
+                f"[{self._source_reference(insight['file_name'], insight['page_label'], insight['score'])}]"
             )
 
         if topic_line:
-            answer_lines.extend(["", f"**Temas relacionados:** {topic_line}"])
+            answer_lines.extend(["", f"{style_config['related_label']} {topic_line}"])
 
         if conclusion:
-            answer_lines.extend(["", f"**Conclusion:** {conclusion}"])
+            answer_lines.extend(["", f"{style_config['sections'][2]} {conclusion}"])
 
         answer_lines.extend(
             [
                 "",
-                "**Nota:** La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
+                f"{style_config['sections'][3]} La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
             ]
         )
         return "\n".join(answer_lines)
@@ -532,9 +663,11 @@ class RAGService:
     def _generate_llm_answer(
         self,
         question: str,
-        evidence_blocks: list[tuple[str, float, str]],
+        evidence_blocks: list[tuple[str, str, float, str]],
         history: list[dict],
+        response_style: str = "academico",
     ) -> str:
+        style_config = self._style_config(response_style)
         evidence_text = self._format_evidence_for_llm(evidence_blocks)
         conversation_text = self._format_history_for_llm(history)
         prompt = (
@@ -544,6 +677,7 @@ class RAGService:
             "Debes usar solo la evidencia proporcionada. Si la evidencia no alcanza, dilo claramente.\n"
             "No inventes datos ni cites paginas inexistentes.\n"
             "Prefiere una respuesta natural y organizada.\n"
+            f"{style_config['llm_instruction']}\n"
             "\n"
             "Historial reciente:\n"
             f"{conversation_text}\n\n"
@@ -554,9 +688,10 @@ class RAGService:
             "Instrucciones de salida:\n"
             "1. Responde de forma clara y directa.\n"
             "2. Explica el sentido de la informacion, no la repitas literalmente.\n"
-            "3. Organiza la respuesta con estas secciones cuando aporten claridad: **Respuesta breve**, **Puntos clave**, **Conclusion**.\n"
-            "4. Usa listas con guiones si enumeras ideas.\n"
-            "5. Si notas limites o ambiguedades en la evidencia, mencialos al final en una frase breve bajo **Nota**.\n"
+            f"3. Organiza la respuesta con estas secciones cuando aporten claridad: {style_config['sections'][0]}, {style_config['sections'][1]}, {style_config['sections'][2]}.\n"
+            "4. Usa listas con guiones si enumeras ideas y adapta el nivel de detalle al estilo solicitado.\n"
+            f"5. Si notas limites o ambiguedades en la evidencia, mencionalos al final en una frase breve bajo {style_config['sections'][3]}.\n"
+            f"6. Si mencionas temas complementarios, presentalos bajo {style_config['related_label']}.\n"
         )
 
         try:
@@ -589,11 +724,11 @@ class RAGService:
 
         return "\n".join(lines) if lines else "Sin historial previo."
 
-    def _format_evidence_for_llm(self, evidence_blocks: list[tuple[str, float, str]]) -> str:
+    def _format_evidence_for_llm(self, evidence_blocks: list[tuple[str, str, float, str]]) -> str:
         blocks = []
-        for index, (file_name, score, text) in enumerate(evidence_blocks[:4], start=1):
+        for index, (file_name, page_label, score, text) in enumerate(evidence_blocks[:4], start=1):
             blocks.append(
-                f"[Fuente {index}] Documento: {file_name} | relevancia: {score}\n{text[:1400]}"
+                f"[Fuente {index}] Documento: {file_name} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:1400]}"
             )
         return "\n\n".join(blocks)
 
@@ -621,12 +756,12 @@ class RAGService:
         return overlap, len(sentence)
 
     def _build_analysis_insights(
-        self, evidence_blocks: list[tuple[str, float, str]], keywords: set[str]
+        self, evidence_blocks: list[tuple[str, str, float, str]], keywords: set[str]
     ) -> list[dict]:
         insights: list[dict] = []
         seen = set()
 
-        for file_name, score, text in evidence_blocks:
+        for file_name, page_label, score, text in evidence_blocks:
             best_sentences = self._best_sentences_for_question(text, keywords)
             if not best_sentences:
                 continue
@@ -645,6 +780,7 @@ class RAGService:
                 {
                     "summary": summary,
                     "file_name": file_name,
+                    "page_label": page_label,
                     "score": score,
                     "keywords": self._normalize_tokens(summary),
                 }
@@ -726,12 +862,36 @@ class RAGService:
             return ""
         return cleaned
 
-    def _build_overview(self, question: str, insights: list[dict], keywords: set[str]) -> str:
+    def _build_overview(
+        self,
+        question: str,
+        insights: list[dict],
+        keywords: set[str],
+        response_style: str,
+    ) -> str:
         question_style = self._question_style(question)
         primary_topics = self._collect_topics(insights, keywords)
         topic_text = ", ".join(primary_topics[:3])
 
-        if question_style == "como":
+        if response_style == "simple":
+            if question_style == "como":
+                base = "Segun los fragmentos mas utiles, asi se entiende o se aplica el tema que preguntaste"
+            elif question_style == "por_que":
+                base = "Los textos ayudan a entender por que ocurre o por que se recomienda ese tema"
+            elif question_style == "cuales":
+                base = "Los documentos muestran varios puntos concretos relacionados con tu pregunta"
+            else:
+                base = "Con lo que aparece en los documentos, esto es lo mas importante para responderte"
+        elif response_style == "tecnico":
+            if question_style == "como":
+                base = "La evidencia recuperada describe el procedimiento o la aplicacion operativa del tema consultado"
+            elif question_style == "por_que":
+                base = "La evidencia disponible permite identificar los factores o fundamentos tecnicos asociados al tema consultado"
+            elif question_style == "cuales":
+                base = "Los fragmentos recuperados permiten discriminar componentes, criterios o elementos tecnicos vinculados con la consulta"
+            else:
+                base = "La respuesta puede sintetizarse a partir de la evidencia recuperada con enfoque tecnico"
+        elif question_style == "como":
             base = "Al revisar los fragmentos mas relevantes, se describe principalmente como ocurre o se aplica el tema consultado"
         elif question_style == "por_que":
             base = "Los textos recuperados apuntan sobre todo a las causas o razones asociadas al tema consultado"
@@ -750,18 +910,92 @@ class RAGService:
             return ""
         return ", ".join(topics[:5]) + "."
 
-    def _build_conclusion(self, question: str, insights: list[dict], keywords: set[str]) -> str:
+    def _style_config(self, response_style: str) -> dict:
+        return RESPONSE_STYLE_GUIDANCE.get(response_style, RESPONSE_STYLE_GUIDANCE["academico"])
+
+    def _format_insight_summary(self, summary: str, response_style: str) -> str:
+        cleaned = self._clean_sentence(summary)
+
+        if response_style == "simple":
+            cleaned = re.sub(r"^Los documentos indican que\s+", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"^La evidencia sugiere que\s+", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"^Se identifica que\s+", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\bademas\b", "tambien", cleaned, flags=re.IGNORECASE)
+            if cleaned:
+                cleaned = cleaned[:1].upper() + cleaned[1:]
+            return self._ensure_sentence(cleaned)
+
+        if response_style == "tecnico":
+            cleaned = re.sub(r"^Los documentos indican que\s+", "", cleaned, flags=re.IGNORECASE)
+            if not re.match(r"^(Se identifica|Se observa|Se registra|El manejo|La evidencia)", cleaned):
+                cleaned = f"Se identifica que {self._lowercase_first(cleaned)}"
+            return self._ensure_sentence(cleaned)
+
+        if not re.match(r"^(La evidencia|Los documentos|Se observa|Se identifica)", cleaned):
+            cleaned = f"La evidencia sugiere que {self._lowercase_first(cleaned)}"
+        return self._ensure_sentence(cleaned)
+
+    def _select_summary_chunks(self, chunks: list[dict]) -> list[dict]:
+        sorted_chunks = sorted(
+            chunks,
+            key=lambda chunk: (len(chunk["tokens"]), len(chunk["text"])),
+            reverse=True,
+        )
+        selected = []
+        seen_pages = set()
+        for chunk in sorted_chunks:
+            page_label = chunk.get("page_label", "")
+            if page_label and page_label in seen_pages:
+                continue
+            selected.append(chunk)
+            if page_label:
+                seen_pages.add(page_label)
+            if len(selected) >= 6:
+                break
+
+        return selected or sorted_chunks[:6]
+
+    def _source_reference(self, file_name: str, page_label: str, score: float) -> str:
+        if page_label:
+            return f"{file_name}, pagina {page_label}, relevancia {score}"
+        return f"{file_name}, relevancia {score}"
+
+    def _build_conclusion(
+        self,
+        question: str,
+        insights: list[dict],
+        keywords: set[str],
+        response_style: str,
+    ) -> str:
         if not insights:
             return ""
 
         dominant_topics = self._collect_topics(insights, keywords)
         top_summary = insights[0]["summary"]
+        styled_top_summary = self._format_insight_summary(top_summary, response_style)
+
+        if response_style == "simple":
+            if dominant_topics:
+                return (
+                    f"En pocas palabras, para entender este tema conviene fijarse sobre todo en {', '.join(dominant_topics[:3])}. "
+                    f"{styled_top_summary}"
+                )
+            return styled_top_summary
+
+        if response_style == "tecnico":
+            if dominant_topics:
+                return (
+                    f"En terminos tecnicos, la interpretacion del tema depende principalmente de {', '.join(dominant_topics[:3])}. "
+                    f"{styled_top_summary}"
+                )
+            return styled_top_summary
+
         if dominant_topics:
             return (
                 f"En conjunto, la evidencia sugiere que el tema se entiende mejor si se consideran especialmente {', '.join(dominant_topics[:3])}, "
-                f"y que {self._lowercase_first(top_summary)}"
+                f"y que {self._lowercase_first(styled_top_summary)}"
             )
-        return self._ensure_sentence(top_summary)
+        return styled_top_summary
 
     def _collect_topics(self, insights: list[dict], keywords: set[str]) -> list[str]:
         frequencies: dict[str, int] = {}

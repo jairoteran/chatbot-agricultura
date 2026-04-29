@@ -121,6 +121,7 @@ code {
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
+  will-change: transform, opacity;
 }
 
 .status-pill {
@@ -159,6 +160,26 @@ code {
   font-size: 0.92rem;
 }
 
+.summary-tools {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.summary-label {
+  color: rgba(248, 250, 247, 0.88);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.summary-select {
+  min-height: 44px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  color: #f7fbf9;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .secondary-button {
   min-height: 46px;
   padding: 0.75rem 1rem;
@@ -187,6 +208,7 @@ code {
   box-shadow: 0 18px 50px rgba(22, 43, 61, 0.08);
   backdrop-filter: blur(10px);
   overflow: hidden;
+  will-change: transform, opacity;
 }
 
 .chat-header {
@@ -217,7 +239,7 @@ code {
   display: flex;
   gap: 1rem;
   margin-bottom: 1.2rem;
-  animation: slide-up 0.28s ease;
+  will-change: transform, opacity;
 }
 
 .message-user {
@@ -248,6 +270,7 @@ code {
   background: #ffffff;
   border: 1px solid rgba(16, 32, 51, 0.06);
   box-shadow: 0 8px 24px rgba(16, 32, 51, 0.06);
+  transform-origin: top left;
 }
 
 .bubble-stack {
@@ -263,6 +286,7 @@ code {
 .message-user .bubble {
   color: #f7fbf9;
   background: linear-gradient(135deg, #1e7068, #225178);
+  transform-origin: top right;
 }
 
 .formatted-paragraph {
@@ -292,24 +316,26 @@ code {
 
 .bubble-loading {
   display: inline-flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.loading-dots {
+  display: inline-flex;
   gap: 0.5rem;
   align-items: center;
 }
 
-.bubble-loading span {
+.loading-dots span {
   width: 9px;
   height: 9px;
   border-radius: 999px;
   background: #7a8ba1;
-  animation: bounce 1s infinite ease-in-out;
 }
 
-.bubble-loading span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.bubble-loading span:nth-child(3) {
-  animation-delay: 0.3s;
+.loading-copy {
+  color: #4d647b;
+  font-weight: 700;
 }
 
 .sources-panel {
@@ -331,12 +357,20 @@ code {
   border: 1px solid rgba(16, 32, 51, 0.08);
   border-radius: 14px;
   background: rgba(246, 248, 250, 0.92);
+  will-change: transform, opacity;
 }
 
 .source-card p {
   margin: 0;
   color: #23384d;
   font-weight: 600;
+}
+
+.source-meta {
+  margin-top: 0.35rem !important;
+  color: #597089 !important;
+  font-size: 0.88rem;
+  font-weight: 500 !important;
 }
 
 .composer {
@@ -388,30 +422,6 @@ code {
   opacity: 0.6;
   cursor: not-allowed;
   box-shadow: none;
-}
-
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: scale(0.8);
-    opacity: 0.6;
-  }
-  40% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @media (max-width: 900px) {

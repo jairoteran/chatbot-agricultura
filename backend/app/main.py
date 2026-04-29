@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import threading
 
@@ -6,15 +7,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from app.rag_service import RAGService
-from app.schemas import ChatRequest, ChatResponse, HealthResponse, ReindexResponse
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    DocumentSummaryRequest,
+    DocumentSummaryResponse,
+    HealthResponse,
+    ReindexResponse,
+)
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _allowed_origins() -> list[str]:
+    raw_origins = os.getenv("CORS_ORIGINS", "").strip()
+    default_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    if not raw_origins:
+        return default_origins
+
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
 app = FastAPI(title="PDF Chat API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,8 +126,34 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     try:
         history = [message.model_dump() for message in payload.history]
-        result = rag_service.query(payload.question, history=history)
+        result = rag_service.query(
+            payload.question,
+            history=history,
+            response_style=payload.response_style,
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return ChatResponse(**result)
+
+
+@app.post("/summarize-document", response_model=DocumentSummaryResponse)
+def summarize_document(payload: DocumentSummaryRequest) -> DocumentSummaryResponse:
+    if rag_service is None:
+        ensure_service_initializing(force_rebuild=False)
+        raise HTTPException(
+            status_code=503,
+            detail=startup_error or "El servicio aun se esta inicializando. Espera a que /health indique que esta listo.",
+        )
+
+    try:
+        result = rag_service.summarize_document(
+            payload.file_name,
+            response_style=payload.response_style,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return DocumentSummaryResponse(**result)

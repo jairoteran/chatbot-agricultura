@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 const CHAT_URL = import.meta.env.VITE_API_URL || "/api/chat";
 const HEALTH_URL = import.meta.env.VITE_HEALTH_URL || "/api/health";
 const REINDEX_URL = import.meta.env.VITE_REINDEX_URL || "/api/reindex";
+const SUMMARY_URL = import.meta.env.VITE_SUMMARY_URL || "/api/summarize-document";
 
 const initialMessage = {
   role: "assistant",
@@ -10,6 +12,45 @@ const initialMessage = {
     "Hola. Estoy listo para analizar los PDFs cargados y responder con base en su contenido.",
   sources: [],
 };
+
+const shellVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] },
+  },
+};
+
+const messageVariants = {
+  hidden: { opacity: 0, y: 18, scale: 0.985 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
+  },
+  exit: {
+    opacity: 0,
+    y: -10,
+    transition: { duration: 0.18, ease: "easeOut" },
+  },
+};
+
+const panelVariants = {
+  hidden: { opacity: 0, y: 10 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] },
+  },
+};
+
+const responseStyleOptions = [
+  { value: "academico", label: "Academico" },
+  { value: "simple", label: "Simple" },
+  { value: "tecnico", label: "Tecnico" },
+];
 
 function documentCountLabel(count) {
   return `${count} documento${count === 1 ? "" : "s"} cargado${count === 1 ? "" : "s"}`;
@@ -76,6 +117,9 @@ function App() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isReindexing, setIsReindexing] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState("");
+  const [responseStyle, setResponseStyle] = useState("academico");
   const [backendStatus, setBackendStatus] = useState({
     status: "checking",
     detail: "Verificando backend...",
@@ -88,6 +132,8 @@ function App() {
     response_mode: "extractive",
     llm_provider: "",
     llm_model: "",
+    deployment_mode: "local",
+    allow_reindex: true,
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -108,6 +154,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    let timerId;
 
     async function loadHealth() {
       try {
@@ -121,6 +168,12 @@ function App() {
         }
 
         setBackendStatus(data);
+        setSelectedDocument((currentValue) => {
+          if (currentValue && data.indexed_files?.includes(currentValue)) {
+            return currentValue;
+          }
+          return data.indexed_files?.[0] || "";
+        });
       } catch {
         if (!active) {
           return;
@@ -138,18 +191,28 @@ function App() {
           response_mode: "extractive",
           llm_provider: "",
           llm_model: "",
+          deployment_mode: "local",
+          allow_reindex: true,
         });
+      } finally {
+        if (!active) {
+          return;
+        }
+
+        const nextDelay = backendReady ? 15000 : 5000;
+        timerId = window.setTimeout(loadHealth, nextDelay);
       }
     }
 
     loadHealth();
-    const timer = window.setInterval(loadHealth, 15000);
 
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
     };
-  }, []);
+  }, [backendReady]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -178,7 +241,7 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ question, history }),
+        body: JSON.stringify({ question, history, response_style: responseStyle }),
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -197,7 +260,7 @@ function App() {
     } catch (error) {
       const fallbackMessage =
         error instanceof TypeError
-          ? "No pude conectar con el backend. Verifica que FastAPI este corriendo en http://localhost:8000."
+          ? "No pude conectar con el backend. Verifica que FastAPI este corriendo en http://127.0.0.1:8000."
           : "Ocurrio un error al comunicarse con el backend.";
 
       setMessages([
@@ -253,13 +316,62 @@ function App() {
           role: "assistant",
           content:
             error instanceof TypeError
-              ? "No pude conectar con el backend para reindexar. Verifica que FastAPI este corriendo en http://localhost:8000."
+              ? "No pude conectar con el backend para reindexar. Verifica que FastAPI este corriendo en http://127.0.0.1:8000."
               : error.message || "No fue posible reindexar los documentos.",
           sources: [],
         },
       ]);
     } finally {
       setIsReindexing(false);
+    }
+  }
+
+  async function handleSummarizeDocument() {
+    if (!selectedDocument || isSummarizing || !backendReady) {
+      return;
+    }
+
+    setIsSummarizing(true);
+
+    try {
+      const response = await fetch(SUMMARY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file_name: selectedDocument,
+          response_style: responseStyle,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || "No fue posible resumir el documento.");
+      }
+
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          role: "assistant",
+          content: payload.answer,
+          sources: payload.sources || [],
+        },
+      ]);
+    } catch (error) {
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          role: "assistant",
+          content:
+            error instanceof TypeError
+              ? "No pude conectar con el backend para resumir el documento."
+              : error.message || "No fue posible resumir el documento.",
+          sources: [],
+        },
+      ]);
+    } finally {
+      setIsSummarizing(false);
     }
   }
 
@@ -271,6 +383,7 @@ function App() {
   }
 
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
+  const canReindex = backendStatus.allow_reindex;
   const indexSourceLabel =
     backendStatus.index_source === "storage"
       ? "Indice cargado desde almacenamiento"
@@ -284,13 +397,20 @@ function App() {
         ? "Backend listo"
         : "Backend no listo";
   const responseModeLabel =
-    backendStatus.response_mode === "generative-rag"
+    !backendReady
+      ? "Cargando modo de respuesta..."
+      : backendStatus.response_mode === "generative-rag"
       ? `Modo conversacional con ${backendStatus.llm_provider || "LLM"}: ${backendStatus.llm_model || "modelo no indicado"}`
       : "Modo basico sin modelo generativo";
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <motion.div
+      className="app-shell"
+      initial="hidden"
+      animate="visible"
+      variants={shellVariants}
+    >
+      <motion.aside className="sidebar" variants={panelVariants}>
         <div>
           <p className="eyebrow">PDF Chat</p>
           <h1>Asistente documental</h1>
@@ -302,11 +422,17 @@ function App() {
           </p>
         </div>
 
-        <div className="status-panel">
-          <div className={`status-pill status-${backendStatus.status}`}>
+        <motion.div className="status-panel" variants={panelVariants}>
+          <motion.div
+            className={`status-pill status-${backendStatus.status}`}
+            key={`${backendStatus.status}-${backendStatus.indexed_file_count}-${backendStatus.index_source}`}
+            initial={{ opacity: 0.7, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+          >
             <span className="dot" />
             {backendStatusLabel}
-          </div>
+          </motion.div>
           <p className="status-copy">{backendStatus.detail}</p>
           <p className="status-meta">
             {backendStatus.indexed_file_count} documento(s) indexado(s)
@@ -321,18 +447,72 @@ function App() {
             <p className="status-meta">Embeddings: {backendStatus.embed_model}</p>
           )}
           <p className="status-meta">{responseModeLabel}</p>
+          <p className="status-meta">
+            Despliegue: {backendStatus.deployment_mode === "vercel" ? "Vercel" : "Local"}
+          </p>
+          {!canReindex && (
+            <p className="status-meta">
+              Reindexado en tiempo real deshabilitado en este despliegue.
+            </p>
+          )}
+          <div className="summary-tools">
+            <label className="summary-label" htmlFor="response-style-select">
+              Estilo de respuesta
+            </label>
+            <select
+              id="response-style-select"
+              className="summary-select"
+              value={responseStyle}
+              onChange={(event) => setResponseStyle(event.target.value)}
+              disabled={isLoading || isSummarizing}
+            >
+              {responseStyleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {backendStatus.indexed_files.length > 0 && (
+            <div className="summary-tools">
+              <label className="summary-label" htmlFor="document-summary-select">
+                Resumir documento
+              </label>
+              <select
+                id="document-summary-select"
+                className="summary-select"
+                value={selectedDocument}
+                onChange={(event) => setSelectedDocument(event.target.value)}
+                disabled={!backendReady || isSummarizing}
+              >
+                {backendStatus.indexed_files.map((fileName) => (
+                  <option key={fileName} value={fileName}>
+                    {fileName}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={handleSummarizeDocument}
+                disabled={!backendReady || !selectedDocument || isSummarizing}
+              >
+                {isSummarizing ? "Resumiendo..." : "Resumir"}
+              </button>
+            </div>
+          )}
           <button
             className="secondary-button"
             type="button"
             onClick={handleReindex}
-            disabled={isReindexing}
+            disabled={isReindexing || !canReindex}
           >
-            {isReindexing ? "Reindexando..." : "Reindexar PDFs"}
+            {!canReindex ? "Reindexado deshabilitado" : isReindexing ? "Reindexando..." : "Reindexar PDFs"}
           </button>
-        </div>
-      </aside>
+        </motion.div>
+      </motion.aside>
 
-      <main className="chat-layout">
+      <motion.main className="chat-layout" variants={panelVariants}>
         <section className="chat-window">
           <div className="chat-header">
             <div>
@@ -345,11 +525,17 @@ function App() {
           </div>
 
           <div className="messages">
-            {messages.map((message, index) => (
-              <article
-                key={`${message.role}-${index}`}
-                className={`message message-${message.role}`}
-              >
+            <AnimatePresence initial={false}>
+              {messages.map((message, index) => (
+                <motion.article
+                  key={`${message.role}-${index}`}
+                  className={`message message-${message.role}`}
+                  variants={messageVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  layout
+                >
                 <div className="avatar">
                   {message.role === "user" ? "Tu" : "IA"}
                 </div>
@@ -358,31 +544,66 @@ function App() {
                     {renderMessageContent(message.content)}
                   </div>
                   {message.role === "assistant" && message.sources?.length > 0 && (
-                    <div className="sources-panel">
+                    <motion.div
+                      className="sources-panel"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.08, duration: 0.25 }}
+                    >
                       <p className="sources-title">Fuentes utilizadas</p>
                       {[...new Set(message.sources.map((source) => source.file_name))].map(
                         (fileName, sourceIndex) => (
-                          <div key={`${fileName}-${sourceIndex}`} className="source-card">
+                          <motion.div
+                            key={`${fileName}-${sourceIndex}`}
+                            className="source-card"
+                            initial={{ opacity: 0, x: -8 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: sourceIndex * 0.04, duration: 0.2 }}
+                          >
                             <p>{fileName}</p>
-                          </div>
+                            {message.sources
+                              .filter((source) => source.file_name === fileName)
+                              .slice(0, 3)
+                              .map((source, pageIndex) => (
+                                <p key={`${fileName}-page-${pageIndex}`} className="source-meta">
+                                  {source.page_label ? `Pagina ${source.page_label}` : "Pagina no identificada"}
+                                </p>
+                              ))}
+                          </motion.div>
                         ),
                       )}
-                    </div>
+                    </motion.div>
                   )}
                 </div>
-              </article>
-            ))}
+                </motion.article>
+              ))}
+            </AnimatePresence>
 
-            {isLoading && (
-              <article className="message message-assistant">
-                <div className="avatar">IA</div>
-                <div className="bubble bubble-loading">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </article>
-            )}
+            <AnimatePresence>
+              {isLoading && (
+                <motion.article
+                  className="message message-assistant"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <div className="avatar">IA</div>
+                  <motion.div
+                    className="bubble bubble-loading"
+                    initial={{ scale: 0.96 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <div className="loading-dots" aria-hidden="true">
+                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0 }} />
+                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.15 }} />
+                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.3 }} />
+                    </div>
+                    <span className="loading-copy">Analizando documentos...</span>
+                  </motion.div>
+                </motion.article>
+              )}
+            </AnimatePresence>
             <div ref={endRef} />
           </div>
         </section>
@@ -404,8 +625,8 @@ function App() {
             Enviar
           </button>
         </form>
-      </main>
-    </div>
+      </motion.main>
+    </motion.div>
   );
 }
 

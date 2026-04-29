@@ -7,6 +7,23 @@ Proyecto web con dos carpetas:
 
 El objetivo del proyecto es que el asistente no solo recupere texto desde los documentos, sino que tambien lo analice y lo explique con lenguaje claro, como un chatbot conversacional.
 
+## Listo para Vercel
+
+El repositorio ya incluye configuracion para desplegarse en `Vercel` con:
+
+- frontend `Vite` construido desde `frontend/`
+- backend `FastAPI` expuesto como funcion Python desde `api/index.py`
+- `vercel.json` con `buildCommand`, `outputDirectory` y exclusions para reducir el bundle
+- `requirements.txt` en la raiz para que Vercel instale las dependencias de Python
+- `.python-version` fijado en `3.12`
+
+Importante para produccion:
+
+- En Vercel el backend se ejecuta sobre un sistema de archivos efimero.
+- Por eso, este proyecto asume que `backend/storage/` ya va incluido y actualizado en el repositorio.
+- El boton `Reindexar PDFs` queda deshabilitado en despliegues Vercel salvo que habilites `ALLOW_RUNTIME_REINDEX=true`.
+- La recomendacion es reindexar localmente, confirmar que `backend/storage/` quedo actualizado y luego hacer deploy.
+
 ## Estructura
 
 ```text
@@ -77,7 +94,7 @@ Coloca tus archivos PDF dentro de `backend/data/`.
 ### 5. Iniciar el servidor
 
 ```powershell
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Endpoints disponibles:
@@ -111,6 +128,7 @@ Puedes crear `frontend/.env` a partir de `frontend/.env.example`, que ya esta in
 VITE_API_URL=/api/chat
 VITE_HEALTH_URL=/api/health
 VITE_REINDEX_URL=/api/reindex
+VITE_SUMMARY_URL=/api/summarize-document
 ```
 
 ### 3. Iniciar el frontend
@@ -122,6 +140,50 @@ npm run dev
 La aplicacion quedara disponible en `http://localhost:5173`.
 
 Durante desarrollo, el frontend usa un proxy de Vite hacia `http://localhost:8000`, por lo que no deberias tener problemas de CORS si ambos servicios estan levantados.
+
+## Despliegue en Vercel
+
+### 1. Variables de entorno recomendadas
+
+Configura en Vercel las variables necesarias para el proveedor que vayas a usar:
+
+```text
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+o bien:
+
+```text
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5.4-mini
+```
+
+Tambien conviene definir:
+
+```text
+CORS_ORIGINS=https://tu-dominio.vercel.app
+```
+
+Solo si quieres permitir reindexado en produccion:
+
+```text
+ALLOW_RUNTIME_REINDEX=true
+```
+
+### 2. Flujo recomendado antes de desplegar
+
+1. Coloca o actualiza tus PDFs en `backend/data/`.
+2. Ejecuta localmente el backend y usa `Reindexar PDFs` o reconstruye el indice.
+3. Verifica que `backend/storage/` se actualizo correctamente.
+4. Sube esos cambios al repositorio.
+5. Despliega en Vercel.
+
+### 3. Que esperar en produccion
+
+- Las rutas del backend quedaran bajo `/api`, por ejemplo `/api/health` y `/api/chat`.
+- El frontend consumira esas rutas automaticamente.
+- Si `backend/storage/` no coincide con `backend/data/`, el despliegue puede iniciar en error porque no podra reconstruir el indice por defecto dentro de Vercel.
 
 ## Iniciar todo con un solo script
 
