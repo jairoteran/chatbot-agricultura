@@ -143,27 +143,54 @@ Durante desarrollo, el frontend usa un proxy de Vite hacia `http://localhost:800
 
 ## Despliegue en Vercel
 
-### 1. Variables de entorno recomendadas
+### 1. Importar el proyecto
 
-Configura en Vercel las variables necesarias para el proveedor que vayas a usar:
+1. Entra a `Vercel`.
+2. Pulsa `Add New Project`.
+3. Conecta tu repositorio de GitHub.
+4. Selecciona este repositorio.
+5. Deja como `Root Directory` la raiz del proyecto.
+6. Vercel usara la configuracion incluida en `vercel.json`.
+
+La configuracion esperada ya queda resuelta desde el repositorio:
+
+- `buildCommand`: `npm --prefix frontend run build`
+- `outputDirectory`: `frontend/dist`
+- backend Python expuesto desde `api/index.py`
+
+### 2. Variables de entorno que debes agregar
+
+#### Requeridas para usar un modelo generativo
+
+Si vas a usar `Gemini`:
 
 ```text
-GEMINI_API_KEY=...
+GEMINI_API_KEY=tu_clave
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
-o bien:
+Si vas a usar `OpenAI`:
 
 ```text
-OPENAI_API_KEY=...
+OPENAI_API_KEY=tu_clave
 OPENAI_MODEL=gpt-5.4-mini
 ```
 
-Tambien conviene definir:
+No necesitas configurar ambos proveedores a la vez. El backend prioriza `Gemini` si encuentra `GEMINI_API_KEY`.
+
+#### Recomendadas para produccion
 
 ```text
 CORS_ORIGINS=https://tu-dominio.vercel.app
 ```
+
+Si luego conectas un dominio propio, agrega tambien ese dominio:
+
+```text
+CORS_ORIGINS=https://tu-dominio.vercel.app,https://chat.tudominio.com
+```
+
+#### Opcionales
 
 Solo si quieres permitir reindexado en produccion:
 
@@ -171,19 +198,85 @@ Solo si quieres permitir reindexado en produccion:
 ALLOW_RUNTIME_REINDEX=true
 ```
 
-### 2. Flujo recomendado antes de desplegar
+No se recomienda habilitarlo en Vercel salvo que entiendas bien el impacto, porque el sistema de archivos del backend es efimero.
+
+#### Variables que normalmente no necesitas en Vercel
+
+En el frontend desplegado en Vercel, normalmente no hace falta definir:
+
+```text
+VITE_API_URL
+VITE_HEALTH_URL
+VITE_REINDEX_URL
+VITE_SUMMARY_URL
+```
+
+Eso es porque el frontend ya usa rutas relativas como `/api/chat`, `/api/health` y `/api/summarize-document`, que funcionan bien cuando frontend y backend viven en el mismo proyecto de Vercel.
+
+### 3. Donde agregar los environments en Vercel
+
+Cuando agregues variables de entorno, puedes asignarlas a:
+
+- `Production`: para el sitio publicado real
+- `Preview`: para despliegues de ramas o pull requests
+- `Development`: si luego quieres usar `vercel dev`
+
+Recomendacion practica:
+
+- agrega `GEMINI_API_KEY` o `OPENAI_API_KEY` al menos en `Production`
+- si vas a probar ramas, agrega tambien las mismas variables a `Preview`
+- deja `Development` opcional si trabajas localmente con `backend/.env`
+
+### 4. Flujo recomendado antes de desplegar
 
 1. Coloca o actualiza tus PDFs en `backend/data/`.
 2. Ejecuta localmente el backend y usa `Reindexar PDFs` o reconstruye el indice.
 3. Verifica que `backend/storage/` se actualizo correctamente.
-4. Sube esos cambios al repositorio.
-5. Despliega en Vercel.
+4. Confirma que `backend/storage/` quedo versionado en Git junto con los cambios de `backend/data/`.
+5. Sube esos cambios al repositorio.
+6. Despliega en Vercel.
 
-### 3. Que esperar en produccion
+### 5. Que esperar en produccion
 
 - Las rutas del backend quedaran bajo `/api`, por ejemplo `/api/health` y `/api/chat`.
 - El frontend consumira esas rutas automaticamente.
+- El estado del backend deberia mostrar `Despliegue: Vercel`.
+- El boton `Reindexar PDFs` queda deshabilitado por defecto.
 - Si `backend/storage/` no coincide con `backend/data/`, el despliegue puede iniciar en error porque no podra reconstruir el indice por defecto dentro de Vercel.
+
+### 6. Lista minima recomendada de variables
+
+Para una configuracion simple con Gemini:
+
+```text
+GEMINI_API_KEY=tu_clave
+GEMINI_MODEL=gemini-2.5-flash
+CORS_ORIGINS=https://tu-proyecto.vercel.app
+```
+
+Para una configuracion simple con OpenAI:
+
+```text
+OPENAI_API_KEY=tu_clave
+OPENAI_MODEL=gpt-5.4-mini
+CORS_ORIGINS=https://tu-proyecto.vercel.app
+```
+
+### 7. Verificacion despues del deploy
+
+Despues de desplegar, revisa:
+
+1. `https://tu-proyecto.vercel.app/api/health`
+2. que el frontend cargue sin errores
+3. que el estado muestre documentos indexados
+4. que una pregunta sencilla responda correctamente
+
+Si `/api/health` responde con error, revisa principalmente:
+
+- variables de entorno faltantes
+- `backend/storage/` desactualizado o ausente
+- limites del proveedor de IA
+- errores de importacion o dependencias en el build log
 
 ## Iniciar todo con un solo script
 
