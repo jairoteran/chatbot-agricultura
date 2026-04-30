@@ -691,27 +691,106 @@ class RAGService:
 
     def _display_title(self, file_name: str) -> str:
         stem = Path(file_name).stem.strip()
-        cleaned = stem.replace("_", " ")
+        cleaned = self._repair_mojibake(stem)
+        signature = re.sub(r"[^a-z0-9]+", "", self._normalize_text(cleaned))
+        lowered_stem = stem.lower()
+
+        if "agroecologiaenelecuadorprocesohistoricologrosydesa" in signature:
+            return "Agroecologia en el Ecuador: proceso historico, logros y desafios"
+        if signature.startswith("dialnetlarevalorizaciondelaidentidadcultural"):
+            return "La revalorizacion de la identidad cultural"
+        if signature.startswith("dialnetsaberesancestrales"):
+            return "Saberes ancestrales"
+        if signature.startswith("e11modulosaberesancestrales"):
+            return "Modulo de saberes ancestrales"
+        if signature.startswith("estudiosaberesancestrales"):
+            return "Estudio de saberes ancestrales"
+        if signature == "papa":
+            return "Papa"
+        if "resumenejecutivodiagnosticosterritorialesdelsectoragrario" in signature:
+            return "Resumen ejecutivo de diagnosticos territoriales del sector agrario"
+        if "resumen-ejecutivo" in lowered_stem and "sector-agrario" in lowered_stem:
+            return "Resumen ejecutivo de diagnosticos territoriales del sector agrario"
+
+        cleaned = cleaned.replace("_", " ")
         cleaned = re.sub(r"\+", " ", cleaned)
         cleaned = re.sub(r"%20", " ", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_,.;:")
-        cleaned = unicodedata.normalize("NFKC", cleaned)
+        cleaned = re.sub(r"\b\d{1,2}(?:[-_/]\d{1,2}){2,}\b", "", cleaned)
+        cleaned = re.sub(r"\b\d{6,}\b$", "", cleaned)
+        cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
+        cleaned = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", cleaned)
 
         if cleaned.lower().startswith("dialnet-"):
             cleaned = cleaned[8:]
         if cleaned.lower().startswith("editum,"):
             cleaned = cleaned[7:]
 
+        cleaned = re.sub(r"\bcap(?:itulo)?\s*\d+\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bcompressed\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bweb[- ]?sp\b", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"[-_]{2,}", " ", cleaned)
-        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+        cleaned = re.sub(r"[-_]", " ", cleaned)
+        cleaned = re.sub(r"\b\d+\b$", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_,.;:")
 
         if not cleaned:
             return file_name
 
-        if cleaned.isupper():
-            cleaned = cleaned.title()
+        return self._title_case_spanish(cleaned)
+
+    def _repair_mojibake(self, text: str) -> str:
+        cleaned = unicodedata.normalize("NFKC", text)
+        replacements = {
+            "Â¦": "",
+            "Ã¼": "u",
+            "Ã¡": "a",
+            "Ã©": "e",
+            "Ã­": "i",
+            "Ã³": "o",
+            "Ãº": "u",
+            "Ã±": "n",
+        }
+        for source, target in replacements.items():
+            cleaned = cleaned.replace(source, target)
+
+        for _ in range(2):
+            try:
+                repaired = cleaned.encode("latin-1").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                break
+            if repaired == cleaned:
+                break
+            cleaned = repaired
 
         return cleaned
+
+    def _title_case_spanish(self, text: str) -> str:
+        small_words = {
+            "a", "al", "con", "de", "del", "el", "en", "la", "las", "los",
+            "para", "por", "un", "una", "y",
+        }
+        acronyms = {"PDF", "SP", "I", "II", "III", "IV", "V"}
+        words = []
+
+        for index, word in enumerate(text.split()):
+            if word.upper() in acronyms:
+                words.append(word.upper())
+                continue
+
+            lowered = word.lower()
+            if index > 0 and lowered in small_words:
+                words.append(lowered)
+                continue
+
+            if word.isupper() or re.search(r"[A-Z]{3,}", word):
+                words.append(word.capitalize())
+                continue
+
+            words.append(word[:1].upper() + word[1:])
+
+        title = " ".join(words)
+        title = re.sub(r"\s+:\s+", ": ", title)
+        return title.strip()
 
     def _compose_answer(
         self,

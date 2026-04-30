@@ -63,6 +63,24 @@ function compactLabel(text, maxLength = 72) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
+function deploymentLabel(mode) {
+  if (mode === "vercel") return "Vercel";
+  if (mode === "render") return "Render";
+  if (mode === "railway") return "Railway";
+  if (mode === "fly") return "Fly.io";
+  return "Local";
+}
+
+function responseModeLabel(status, backendReady) {
+  if (!backendReady) {
+    return "Inicializando";
+  }
+  if (status.response_mode === "generative-rag") {
+    return `${status.llm_provider ? status.llm_provider.toUpperCase() : "LLM"} activo`;
+  }
+  return "Modo basico";
+}
+
 function renderInlineFormatting(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
@@ -411,6 +429,13 @@ function App() {
     }
   }
 
+  const statusLabel =
+    backendStatus.status === "checking"
+      ? "Inicializando backend"
+      : backendReady
+        ? "Backend listo"
+        : "Backend no listo";
+
   return (
     <motion.div
       className="app-shell"
@@ -429,13 +454,32 @@ function App() {
           </p>
         </div>
 
-        {!backendStatus.allow_reindex && (
-          <motion.div className="status-panel" variants={panelVariants}>
+        <motion.div className="status-panel" variants={panelVariants}>
+          <motion.div
+            className={`status-pill status-${backendStatus.status}`}
+            initial={{ opacity: 0.7, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+          >
+            <span className="dot" />
+            {statusLabel}
+          </motion.div>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Respuestas</span>
+              <strong>{responseModeLabel(backendStatus, backendReady)}</strong>
+            </div>
+            <div className="status-card">
+              <span className="status-card-label">Despliegue</span>
+              <strong>{deploymentLabel(backendStatus.deployment_mode)}</strong>
+            </div>
+          </div>
+          {!backendStatus.allow_reindex && (
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.
             </p>
-          </motion.div>
-        )}
+          )}
+        </motion.div>
       </motion.aside>
 
       <motion.main className="chat-layout" variants={panelVariants}>
@@ -488,7 +532,7 @@ function App() {
                       value={document.file_name}
                       title={document.display_title || document.file_name}
                     >
-                      {document.display_title || document.file_name}
+                      {compactLabel(document.display_title || document.file_name)}
                     </option>
                   ))}
                 </select>
