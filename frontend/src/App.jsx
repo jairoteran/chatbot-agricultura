@@ -84,6 +84,13 @@ function responseModeSummary(status, backendReady) {
   return "Modo basico";
 }
 
+function indexSourceSummary(source) {
+  if (source === "storage") return "Storage";
+  if (source === "rebuild") return "Rebuild";
+  if (source === "chunk-cache") return "Chunk cache";
+  return "Inicializando";
+}
+
 function renderInlineFormatting(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
@@ -420,6 +427,9 @@ function App() {
         : "Backend no listo";
   const responseModeLabel = responseModeSummary(backendStatus, backendReady);
   const deploymentLabelText = deploymentLabel(backendStatus.deployment_mode);
+  const indexSourceLabel = indexSourceSummary(backendStatus.index_source);
+  const activeModelLabel =
+    backendStatus.llm_model || backendStatus.embed_model || "No definido";
   const readyDetail =
     backendStatus.status === "error"
       ? backendStatus.detail
@@ -467,6 +477,24 @@ function App() {
               <span className="status-card-label">Despliegue</span>
               <strong>{deploymentLabelText}</strong>
             </div>
+          </div>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Indice</span>
+              <strong>{indexSourceLabel}</strong>
+            </div>
+            <div className="status-card">
+              <span className="status-card-label">Arranque</span>
+              <strong>
+                {backendStatus.last_index_seconds > 0
+                  ? `${backendStatus.last_index_seconds.toFixed(2)} s`
+                  : "--"}
+              </strong>
+            </div>
+          </div>
+          <div className="status-card status-card-wide">
+            <span className="status-card-label">Modelo activo</span>
+            <strong>{activeModelLabel}</strong>
           </div>
           {!canReindex && (
             <p className="status-meta">
