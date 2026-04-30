@@ -80,6 +80,7 @@ code {
   max-width: 28ch;
   margin-top: 1rem;
   color: rgba(248, 250, 247, 0.82);
+  overflow-wrap: anywhere;
 }
 
 .document-counter {
@@ -116,12 +117,17 @@ code {
 .status-panel {
   display: grid;
   gap: 0.75rem;
+  min-width: 0;
   padding: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
   will-change: transform, opacity;
+}
+
+.status-panel > * {
+  min-width: 0;
 }
 
 .status-pill {
@@ -149,20 +155,24 @@ code {
 .status-copy,
 .status-meta {
   margin: 0;
+  min-width: 0;
 }
 
 .status-copy {
   color: rgba(248, 250, 247, 0.88);
+  overflow-wrap: anywhere;
 }
 
 .status-meta {
   color: rgba(248, 250, 247, 0.68);
   font-size: 0.92rem;
+  overflow-wrap: anywhere;
 }
 
 .summary-tools {
   display: grid;
   gap: 0.55rem;
+  min-width: 0;
 }
 
 .summary-label {
@@ -172,6 +182,9 @@ code {
 }
 
 .summary-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 44px;
   padding: 0.7rem 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -181,6 +194,8 @@ code {
 }
 
 .secondary-button {
+  width: 100%;
+  max-width: 100%;
   min-height: 46px;
   padding: 0.75rem 1rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -188,6 +203,8 @@ code {
   color: #f7fbf9;
   background: rgba(255, 255, 255, 0.08);
   cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .chat-layout {
@@ -432,6 +449,10 @@ code {
   .sidebar {
     gap: 1.5rem;
     padding: 1.5rem;
+  }
+
+  .status-panel {
+    width: 100%;
   }
 
   .sidebar h1 {
