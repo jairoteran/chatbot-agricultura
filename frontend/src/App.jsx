@@ -473,60 +473,6 @@ function App() {
               El reindexado en vivo esta deshabilitado en este despliegue.
             </p>
           )}
-          <div className="summary-tools">
-            <label className="summary-label" htmlFor="response-style-select">
-              Estilo de respuesta
-            </label>
-            <select
-              id="response-style-select"
-              className="summary-select"
-              value={responseStyle}
-              onChange={(event) => setResponseStyle(event.target.value)}
-              disabled={isLoading || isSummarizing}
-            >
-              {responseStyleOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {backendStatus.indexed_files.length > 0 && (
-            <div className="summary-tools">
-              <label className="summary-label" htmlFor="document-summary-select">
-                Resumir documento
-              </label>
-              <select
-                id="document-summary-select"
-                className="summary-select"
-                value={selectedDocument}
-                onChange={(event) => setSelectedDocument(event.target.value)}
-                disabled={!backendReady || isSummarizing}
-              >
-                {backendStatus.indexed_files.map((fileName) => (
-                  <option key={fileName} value={fileName} title={fileName}>
-                    {compactLabel(fileName)}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={handleSummarizeDocument}
-                disabled={!backendReady || !selectedDocument || isSummarizing}
-              >
-                {isSummarizing ? "Resumiendo..." : "Resumir"}
-              </button>
-            </div>
-          )}
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={handleReindex}
-            disabled={isReindexing || !canReindex}
-          >
-            {!canReindex ? "Reindexado deshabilitado" : isReindexing ? "Reindexando..." : "Reindexar PDFs"}
-          </button>
         </motion.div>
       </motion.aside>
 
@@ -539,6 +485,71 @@ function App() {
             </div>
             <div className="header-meta">
               <span>{documentCountLabel(backendStatus.indexed_file_count)}</span>
+            </div>
+          </div>
+
+          <div className="chat-toolbar">
+            <div className="toolbar-group toolbar-group-style">
+              <label className="summary-label" htmlFor="response-style-select">
+                Estilo
+              </label>
+              <select
+                id="response-style-select"
+                className="summary-select toolbar-select"
+                value={responseStyle}
+                onChange={(event) => setResponseStyle(event.target.value)}
+                disabled={isLoading || isSummarizing}
+              >
+                {responseStyleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {backendStatus.indexed_files.length > 0 && (
+              <div className="toolbar-group toolbar-group-summary">
+                <label className="summary-label" htmlFor="document-summary-select">
+                  Resumir documento
+                </label>
+                <select
+                  id="document-summary-select"
+                  className="summary-select toolbar-select"
+                  value={selectedDocument}
+                  onChange={(event) => setSelectedDocument(event.target.value)}
+                  disabled={!backendReady || isSummarizing}
+                >
+                  {backendStatus.indexed_files.map((fileName) => (
+                    <option key={fileName} value={fileName} title={fileName}>
+                      {compactLabel(fileName)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="secondary-button toolbar-button"
+                  type="button"
+                  onClick={handleSummarizeDocument}
+                  disabled={!backendReady || !selectedDocument || isSummarizing}
+                >
+                  {isSummarizing ? "Resumiendo..." : "Resumir"}
+                </button>
+              </div>
+            )}
+
+            <div className="toolbar-group toolbar-group-reindex">
+              <label className="summary-label" htmlFor="reindex-button">
+                Indice
+              </label>
+              <button
+                id="reindex-button"
+                className="secondary-button toolbar-button"
+                type="button"
+                onClick={handleReindex}
+                disabled={isReindexing || !canReindex}
+              >
+                {!canReindex ? "Deshabilitado" : isReindexing ? "Reindexando..." : "Reindexar PDFs"}
+              </button>
             </div>
           </div>
 
