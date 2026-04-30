@@ -219,11 +219,11 @@ code {
   align-items: end;
   padding: 1rem 1.5rem 1.15rem;
   border-bottom: 1px solid rgba(108, 69, 142, 0.08);
-  background: rgba(255, 249, 253, 0.78);
+  background: rgba(31, 19, 44, 0.96);
   position: sticky;
   top: 0;
   z-index: 2;
-  box-shadow: 0 8px 24px rgba(126, 81, 164, 0.08);
+  box-shadow: 0 8px 24px rgba(12, 6, 20, 0.24);
 }
 
 .toolbar-group {
@@ -231,9 +231,9 @@ code {
   gap: 0.45rem;
   min-width: 0;
   padding: 0.8rem;
-  border: 1px solid rgba(129, 86, 165, 0.1);
+  border: 1px solid rgba(154, 104, 210, 0.16);
   border-radius: 18px;
-  background: rgba(255, 252, 255, 0.82);
+  background: rgba(44, 27, 62, 0.92);
 }
 
 .toolbar-group-summary {
@@ -255,7 +255,7 @@ code {
 }
 
 .summary-label {
-  color: #7a3ea0;
+  color: #d5a6ff;
   font-size: 0.86rem;
   font-weight: 700;
 }
@@ -268,8 +268,8 @@ code {
   padding: 0.68rem 0.8rem;
   border: 1px solid rgba(255, 224, 240, 0.16);
   border-radius: 14px;
-  color: #51286f;
-  background: rgba(245, 232, 255, 0.9);
+  color: #f4e8ff;
+  background: rgba(69, 43, 97, 0.96);
   text-overflow: ellipsis;
 }
 
