@@ -220,12 +220,20 @@ code {
   padding: 1rem 1.5rem 1.15rem;
   border-bottom: 1px solid rgba(108, 69, 142, 0.08);
   background: rgba(255, 249, 253, 0.78);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 8px 24px rgba(126, 81, 164, 0.08);
 }
 
 .toolbar-group {
   display: grid;
   gap: 0.45rem;
   min-width: 0;
+  padding: 0.8rem;
+  border: 1px solid rgba(129, 86, 165, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 252, 255, 0.82);
 }
 
 .toolbar-group-summary {
@@ -247,7 +255,7 @@ code {
 }
 
 .summary-label {
-  color: rgba(255, 245, 252, 0.9);
+  color: #7a3ea0;
   font-size: 0.86rem;
   font-weight: 700;
 }
@@ -260,8 +268,8 @@ code {
   padding: 0.68rem 0.8rem;
   border: 1px solid rgba(255, 224, 240, 0.16);
   border-radius: 14px;
-  color: #fff7fd;
-  background: rgba(255, 244, 251, 0.11);
+  color: #51286f;
+  background: rgba(245, 232, 255, 0.9);
   text-overflow: ellipsis;
 }
 
@@ -272,8 +280,8 @@ code {
   padding: 0.75rem 1rem;
   border: 1px solid rgba(255, 224, 240, 0.16);
   border-radius: 16px;
-  color: #fff7fd;
-  background: rgba(255, 244, 251, 0.11);
+  color: #fff8fe;
+  background: linear-gradient(135deg, #8a46b6, #f09549);
   cursor: pointer;
   white-space: normal;
   overflow-wrap: anywhere;
