@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { jsPDF } from "jspdf";
 import { AnimatePresence, motion } from "motion/react";
 
 const CHAT_URL = import.meta.env.VITE_API_URL || "/api/chat";
@@ -549,11 +548,12 @@ function App() {
     setCompareSelection(nextSelection);
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (!lastAssistantMessage?.content) {
       return;
     }
 
+    const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF({
       unit: "pt",
       format: "a4",
