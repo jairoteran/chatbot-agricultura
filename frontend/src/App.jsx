@@ -537,20 +537,22 @@ function App() {
               </div>
             )}
 
-            <div className="toolbar-group toolbar-group-reindex">
-              <label className="summary-label" htmlFor="reindex-button">
-                Indice
-              </label>
-              <button
-                id="reindex-button"
-                className="secondary-button toolbar-button"
-                type="button"
-                onClick={handleReindex}
-                disabled={isReindexing || !canReindex}
-              >
-                {!canReindex ? "Deshabilitado" : isReindexing ? "Reindexando..." : "Reindexar PDFs"}
-              </button>
-            </div>
+            {canReindex && (
+              <div className="toolbar-group toolbar-group-reindex">
+                <label className="summary-label" htmlFor="reindex-button">
+                  Indice
+                </label>
+                <button
+                  id="reindex-button"
+                  className="secondary-button toolbar-button"
+                  type="button"
+                  onClick={handleReindex}
+                  disabled={isReindexing}
+                >
+                  {isReindexing ? "Reindexando..." : "Reindexar PDFs"}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="messages">
