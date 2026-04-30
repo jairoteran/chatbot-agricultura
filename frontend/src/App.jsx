@@ -137,6 +137,7 @@ function App() {
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
+  const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -382,7 +383,6 @@ function App() {
     }
   }
 
-  const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
   const canReindex = backendStatus.allow_reindex;
   const indexSourceLabel =
     backendStatus.index_source === "storage"
