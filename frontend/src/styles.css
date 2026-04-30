@@ -216,7 +216,7 @@ code {
   display: grid;
   grid-template-columns: minmax(0, 180px) minmax(0, 1fr) minmax(0, 220px);
   gap: 0.85rem;
-  align-items: end;
+  align-items: stretch;
   padding: 1rem 1.5rem 1.15rem;
   border-bottom: 1px solid rgba(108, 69, 142, 0.08);
   background: rgba(31, 19, 44, 0.96);
@@ -230,6 +230,8 @@ code {
   display: grid;
   gap: 0.45rem;
   min-width: 0;
+  height: 100%;
+  align-content: start;
   padding: 0.8rem;
   border: 1px solid rgba(154, 104, 210, 0.16);
   border-radius: 18px;
@@ -238,7 +240,7 @@ code {
 
 .toolbar-group-summary {
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  align-items: center;
 }
 
 .toolbar-group-summary .summary-label {
@@ -255,7 +257,7 @@ code {
 }
 
 .toolbar-group-help {
-  align-content: start;
+  grid-template-rows: auto auto auto;
 }
 
 .toolbar-tip {
