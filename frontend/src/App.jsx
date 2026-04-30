@@ -56,54 +56,11 @@ function documentCountLabel(count) {
   return `${count} documento${count === 1 ? "" : "s"} cargado${count === 1 ? "" : "s"}`;
 }
 
-function compactLabel(text, maxLength = 34) {
+function compactLabel(text, maxLength = 72) {
   if (!text) {
     return "";
   }
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
-}
-
-function deploymentLabel(mode) {
-  if (mode === "vercel") return "Vercel";
-  if (mode === "render") return "Render";
-  if (mode === "railway") return "Railway";
-  if (mode === "fly") return "Fly.io";
-  return "Local";
-}
-
-function responseModeSummary(status, backendReady) {
-  if (!backendReady) {
-    return "Preparando respuestas";
-  }
-
-  if (status.response_mode === "generative-rag") {
-    const provider = status.llm_provider ? status.llm_provider.toUpperCase() : "LLM";
-    return `${provider} activo`;
-  }
-
-  return "Modo basico";
-}
-
-function indexSourceSummary(source) {
-  if (source === "storage") return "Storage";
-  if (source === "rebuild") return "Rebuild";
-  if (source === "chunk-cache") return "Chunk cache";
-  return "Inicializando";
-}
-
-function evidenceSummary(sources = []) {
-  if (!sources.length) {
-    return "Sin evidencia";
-  }
-
-  const topScore = Math.max(...sources.map((source) => Number(source.score) || 0));
-  if (sources.length >= 3 || topScore >= 0.9) {
-    return "Alta";
-  }
-  if (sources.length >= 2 || topScore >= 0.6) {
-    return "Media";
-  }
-  return "Baja";
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
 function renderInlineFormatting(text) {
@@ -162,6 +119,20 @@ function renderMessageContent(content) {
   return elements;
 }
 
+function normalizeIndexedDocuments(status) {
+  if (status.indexed_documents?.length) {
+    return status.indexed_documents.map((document) => ({
+      file_name: document.file_name,
+      display_title: document.display_title || document.file_name,
+    }));
+  }
+
+  return (status.indexed_files || []).map((fileName) => ({
+    file_name: fileName,
+    display_title: fileName,
+  }));
+}
+
 function App() {
   const [messages, setMessages] = useState([initialMessage]);
   const [input, setInput] = useState("");
@@ -174,6 +145,7 @@ function App() {
     status: "checking",
     detail: "Verificando backend...",
     indexed_files: [],
+    indexed_documents: [],
     indexed_file_count: 0,
     index_ready: false,
     index_source: "startup",
@@ -185,15 +157,10 @@ function App() {
     deployment_mode: "local",
     allow_reindex: true,
   });
-  const [lastResponseStats, setLastResponseStats] = useState({
-    label: "Sin consultas",
-    duration_ms: 0,
-    source_count: 0,
-    evidence: "Sin evidencia",
-  });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
+  const indexedDocuments = normalizeIndexedDocuments(backendStatus);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -229,7 +196,7 @@ function App() {
           if (currentValue && data.indexed_files?.includes(currentValue)) {
             return currentValue;
           }
-          return data.indexed_files?.[0] || "";
+          return data.indexed_documents?.[0]?.file_name || data.indexed_files?.[0] || "";
         });
       } catch {
         if (!active) {
@@ -240,6 +207,7 @@ function App() {
           status: "error",
           detail: "No pude consultar el estado del backend.",
           indexed_files: [],
+          indexed_documents: [],
           indexed_file_count: 0,
           index_ready: false,
           index_source: "startup",
@@ -283,7 +251,6 @@ function App() {
     setMessages(nextMessages);
     setInput("");
     setIsLoading(true);
-    const startedAt = performance.now();
 
     try {
       const history = messages
@@ -306,14 +273,6 @@ function App() {
       if (!response.ok) {
         throw new Error(payload.detail || "No fue posible consultar el backend.");
       }
-
-      const sourceCount = (payload.sources || []).length;
-      setLastResponseStats({
-        label: "Ultima respuesta",
-        duration_ms: Math.round(performance.now() - startedAt),
-        source_count: sourceCount,
-        evidence: evidenceSummary(payload.sources || []),
-      });
 
       setMessages([
         ...nextMessages,
@@ -363,9 +322,13 @@ function App() {
         status: "ok",
         detail: payload.detail,
         indexed_files: payload.indexed_files || [],
+        indexed_documents: payload.indexed_documents || [],
         indexed_file_count: (payload.indexed_files || []).length,
         index_ready: true,
       }));
+      setSelectedDocument(
+        payload.indexed_documents?.[0]?.file_name || payload.indexed_files?.[0] || "",
+      );
       setMessages((currentMessages) => [
         ...currentMessages,
         {
@@ -398,7 +361,6 @@ function App() {
     }
 
     setIsSummarizing(true);
-    const startedAt = performance.now();
 
     try {
       const response = await fetch(SUMMARY_URL, {
@@ -416,14 +378,6 @@ function App() {
       if (!response.ok) {
         throw new Error(payload.detail || "No fue posible resumir el documento.");
       }
-
-      const sourceCount = (payload.sources || []).length;
-      setLastResponseStats({
-        label: "Ultimo resumen",
-        duration_ms: Math.round(performance.now() - startedAt),
-        source_count: sourceCount,
-        evidence: evidenceSummary(payload.sources || []),
-      });
 
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -457,25 +411,6 @@ function App() {
     }
   }
 
-  const canReindex = backendStatus.allow_reindex;
-  const backendStatusLabel =
-    backendStatus.status === "checking"
-      ? "Inicializando backend"
-      : backendReady
-        ? "Backend listo"
-        : "Backend no listo";
-  const responseModeLabel = responseModeSummary(backendStatus, backendReady);
-  const deploymentLabelText = deploymentLabel(backendStatus.deployment_mode);
-  const indexSourceLabel = indexSourceSummary(backendStatus.index_source);
-  const activeModelLabel =
-    backendStatus.llm_model || backendStatus.embed_model || "No definido";
-  const readyDetail =
-    backendStatus.status === "error"
-      ? backendStatus.detail
-      : backendReady
-        ? `${backendStatus.indexed_file_count} documentos listos para consultar`
-        : backendStatus.detail;
-
   return (
     <motion.div
       className="app-shell"
@@ -494,59 +429,13 @@ function App() {
           </p>
         </div>
 
-        <motion.div className="status-panel" variants={panelVariants}>
-          <motion.div
-            className={`status-pill status-${backendStatus.status}`}
-            key={`${backendStatus.status}-${backendStatus.indexed_file_count}-${backendStatus.index_source}`}
-            initial={{ opacity: 0.7, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.22 }}
-          >
-            <span className="dot" />
-            {backendStatusLabel}
-          </motion.div>
-          <p className="status-copy">{readyDetail}</p>
-          <div className="status-highlights">
-            <div className="status-card">
-              <span className="status-card-label">Respuestas</span>
-              <strong>{responseModeLabel}</strong>
-            </div>
-            <div className="status-card">
-              <span className="status-card-label">Despliegue</span>
-              <strong>{deploymentLabelText}</strong>
-            </div>
-          </div>
-          <div className="status-highlights">
-            <div className="status-card">
-              <span className="status-card-label">Tiempo de respuesta</span>
-              <strong>
-                {lastResponseStats.duration_ms > 0
-                  ? `${lastResponseStats.duration_ms} ms`
-                  : "--"}
-              </strong>
-            </div>
-            <div className="status-card">
-              <span className="status-card-label">Fuentes usadas</span>
-              <strong>{lastResponseStats.source_count || "--"}</strong>
-            </div>
-          </div>
-          <div className="status-card status-card-wide">
-            <span className="status-card-label">Nivel de evidencia</span>
-            <strong>{lastResponseStats.evidence}</strong>
-          </div>
-          <div className="status-card status-card-wide">
-            <span className="status-card-label">Contexto tecnico</span>
-            <strong>{responseModeLabel}</strong>
-            <span className="status-inline-meta">
-              {deploymentLabelText} · {indexSourceLabel} · {activeModelLabel}
-            </span>
-          </div>
-          {!canReindex && (
+        {!backendStatus.allow_reindex && (
+          <motion.div className="status-panel" variants={panelVariants}>
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.
             </p>
-          )}
-        </motion.div>
+          </motion.div>
+        )}
       </motion.aside>
 
       <motion.main className="chat-layout" variants={panelVariants}>
@@ -581,7 +470,7 @@ function App() {
               </select>
             </div>
 
-            {backendStatus.indexed_files.length > 0 && (
+            {indexedDocuments.length > 0 && (
               <div className="toolbar-group toolbar-group-summary">
                 <label className="summary-label" htmlFor="document-summary-select">
                   Resumir documento
@@ -593,9 +482,13 @@ function App() {
                   onChange={(event) => setSelectedDocument(event.target.value)}
                   disabled={!backendReady || isSummarizing}
                 >
-                  {backendStatus.indexed_files.map((fileName) => (
-                    <option key={fileName} value={fileName} title={fileName}>
-                      {compactLabel(fileName)}
+                  {indexedDocuments.map((document) => (
+                    <option
+                      key={document.file_name}
+                      value={document.file_name}
+                      title={document.display_title || document.file_name}
+                    >
+                      {document.display_title || document.file_name}
                     </option>
                   ))}
                 </select>
@@ -616,7 +509,7 @@ function App() {
               <p className="toolbar-tip">Shift + Enter para salto de linea</p>
             </div>
 
-            {canReindex && (
+            {backendStatus.allow_reindex && (
               <div className="toolbar-group toolbar-group-reindex">
                 <label className="summary-label" htmlFor="reindex-button">
                   Indice
@@ -646,45 +539,54 @@ function App() {
                   exit="exit"
                   layout
                 >
-                <div className="avatar">
-                  {message.role === "user" ? "Tu" : "IA"}
-                </div>
-                <div className="bubble-stack">
-                  <div className="bubble">
-                    {renderMessageContent(message.content)}
-                  </div>
-                  {message.role === "assistant" && message.sources?.length > 0 && (
-                    <motion.div
-                      className="sources-panel"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.08, duration: 0.25 }}
-                    >
-                      <p className="sources-title">Fuentes utilizadas</p>
-                      {[...new Set(message.sources.map((source) => source.file_name))].map(
-                        (fileName, sourceIndex) => (
+                  <div className="avatar">{message.role === "user" ? "Tu" : "IA"}</div>
+                  <div className="bubble-stack">
+                    <div className="bubble">{renderMessageContent(message.content)}</div>
+                    {message.role === "assistant" && message.sources?.length > 0 && (
+                      <motion.div
+                        className="sources-panel"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.08, duration: 0.25 }}
+                      >
+                        <p className="sources-title">Fuentes utilizadas</p>
+                        {[
+                          ...new Map(
+                            message.sources.map((source) => [
+                              source.file_name,
+                              {
+                                file_name: source.file_name,
+                                display_title: source.display_title || source.file_name,
+                              },
+                            ]),
+                          ).values(),
+                        ].map((sourceGroup, sourceIndex) => (
                           <motion.div
-                            key={`${fileName}-${sourceIndex}`}
+                            key={`${sourceGroup.file_name}-${sourceIndex}`}
                             className="source-card"
                             initial={{ opacity: 0, x: -8 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: sourceIndex * 0.04, duration: 0.2 }}
                           >
-                            <p>{fileName}</p>
+                            <p>{sourceGroup.display_title}</p>
                             {message.sources
-                              .filter((source) => source.file_name === fileName)
+                              .filter((source) => source.file_name === sourceGroup.file_name)
                               .slice(0, 3)
                               .map((source, pageIndex) => (
-                                <p key={`${fileName}-page-${pageIndex}`} className="source-meta">
-                                  {source.page_label ? `Pagina ${source.page_label}` : "Pagina no identificada"}
+                                <p
+                                  key={`${sourceGroup.file_name}-page-${pageIndex}`}
+                                  className="source-meta"
+                                >
+                                  {source.page_label
+                                    ? `Pagina ${source.page_label}`
+                                    : "Pagina no identificada"}
                                 </p>
                               ))}
                           </motion.div>
-                        ),
-                      )}
-                    </motion.div>
-                  )}
-                </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </div>
                 </motion.article>
               ))}
             </AnimatePresence>
@@ -705,9 +607,18 @@ function App() {
                     transition={{ duration: 0.2 }}
                   >
                     <div className="loading-dots" aria-hidden="true">
-                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0 }} />
-                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.15 }} />
-                      <motion.span animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 1, delay: 0.3 }} />
+                      <motion.span
+                        animate={{ y: [0, -4, 0] }}
+                        transition={{ repeat: Infinity, duration: 1, delay: 0 }}
+                      />
+                      <motion.span
+                        animate={{ y: [0, -4, 0] }}
+                        transition={{ repeat: Infinity, duration: 1, delay: 0.15 }}
+                      />
+                      <motion.span
+                        animate={{ y: [0, -4, 0] }}
+                        transition={{ repeat: Infinity, duration: 1, delay: 0.3 }}
+                      />
                     </div>
                     <span className="loading-copy">Analizando documentos...</span>
                   </motion.div>

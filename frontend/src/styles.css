@@ -42,8 +42,10 @@ code {
 .app-shell {
   display: grid;
   grid-template-columns: 300px 1fr;
+  height: 100vh;
   min-height: 100vh;
   min-width: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -561,6 +563,8 @@ code {
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
   }
 
   .sidebar {

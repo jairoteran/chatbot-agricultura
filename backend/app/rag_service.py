@@ -416,6 +416,7 @@ class RAGService:
             "status": "ok",
             "detail": "Servicio listo",
             "indexed_files": self.indexed_files,
+            "indexed_documents": self._indexed_documents_payload(),
             "indexed_file_count": len(self.indexed_files),
             "index_ready": bool(self.chunk_cache),
             "index_source": self.last_index_source,
@@ -440,6 +441,7 @@ class RAGService:
             "status": "ok",
             "detail": "Indice reconstruido correctamente",
             "indexed_files": self.indexed_files,
+            "indexed_documents": self._indexed_documents_payload(),
             "index_source": self.last_index_source,
             "last_index_seconds": self.last_index_seconds,
         }
@@ -493,6 +495,7 @@ class RAGService:
             source_chunks.append(
                 {
                     "file_name": file_name,
+                    "display_title": self._display_title(file_name),
                     "page_label": page_label,
                     "score": score,
                     "text": excerpt,
@@ -534,6 +537,7 @@ class RAGService:
         sources = [
             {
                 "file_name": chunk["file_name"],
+                "display_title": self._display_title(chunk["file_name"]),
                 "page_label": chunk.get("page_label", ""),
                 "score": 1.0,
                 "text": chunk["text"][:650],
@@ -567,6 +571,7 @@ class RAGService:
         )
         return {
             "file_name": selected_chunks[0]["file_name"],
+            "display_title": self._display_title(selected_chunks[0]["file_name"]),
             "answer": answer,
             "found": True,
             "sources": sources,
@@ -674,6 +679,39 @@ class RAGService:
 
     def _node_page_label(self, metadata: dict) -> str:
         return str(metadata.get("page_label") or metadata.get("page") or "")
+
+    def _indexed_documents_payload(self) -> list[dict]:
+        return [
+            {
+                "file_name": file_name,
+                "display_title": self._display_title(file_name),
+            }
+            for file_name in self.indexed_files
+        ]
+
+    def _display_title(self, file_name: str) -> str:
+        stem = Path(file_name).stem.strip()
+        cleaned = stem.replace("_", " ")
+        cleaned = re.sub(r"\+", " ", cleaned)
+        cleaned = re.sub(r"%20", " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_,.;:")
+        cleaned = unicodedata.normalize("NFKC", cleaned)
+
+        if cleaned.lower().startswith("dialnet-"):
+            cleaned = cleaned[8:]
+        if cleaned.lower().startswith("editum,"):
+            cleaned = cleaned[7:]
+
+        cleaned = re.sub(r"[-_]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+
+        if not cleaned:
+            return file_name
+
+        if cleaned.isupper():
+            cleaned = cleaned.title()
+
+        return cleaned
 
     def _compose_answer(
         self,
@@ -810,7 +848,7 @@ class RAGService:
         blocks = []
         for index, (file_name, page_label, score, text) in enumerate(evidence_blocks[:4], start=1):
             blocks.append(
-                f"[Fuente {index}] Documento: {file_name} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:1400]}"
+                f"[Fuente {index}] Documento: {self._display_title(file_name)} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:1400]}"
             )
         return "\n\n".join(blocks)
 
@@ -1038,9 +1076,10 @@ class RAGService:
         return selected or sorted_chunks[:6]
 
     def _source_reference(self, file_name: str, page_label: str, score: float) -> str:
+        display_title = self._display_title(file_name)
         if page_label:
-            return f"{file_name}, pagina {page_label}, relevancia {score}"
-        return f"{file_name}, relevancia {score}"
+            return f"{display_title}, pagina {page_label}, relevancia {score}"
+        return f"{display_title}, relevancia {score}"
 
     def _build_conclusion(
         self,

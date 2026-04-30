@@ -20,9 +20,15 @@ class ChatRequest(BaseModel):
 
 class SourceChunk(BaseModel):
     file_name: str
+    display_title: str = ""
     page_label: str = ""
     score: float
     text: str
+
+
+class IndexedDocument(BaseModel):
+    file_name: str
+    display_title: str
 
 
 class ChatResponse(BaseModel):
@@ -35,6 +41,7 @@ class HealthResponse(BaseModel):
     status: str
     detail: str
     indexed_files: list[str] = Field(default_factory=list)
+    indexed_documents: list[IndexedDocument] = Field(default_factory=list)
     indexed_file_count: int = 0
     index_ready: bool = False
     index_source: str = "startup"
@@ -51,6 +58,7 @@ class ReindexResponse(BaseModel):
     status: str
     detail: str
     indexed_files: list[str] = Field(default_factory=list)
+    indexed_documents: list[IndexedDocument] = Field(default_factory=list)
     index_source: str = "rebuild"
     last_index_seconds: float = 0.0
 
@@ -66,6 +74,7 @@ class DocumentSummaryRequest(BaseModel):
 
 class DocumentSummaryResponse(BaseModel):
     file_name: str
+    display_title: str = ""
     answer: str
     found: bool
     sources: list[SourceChunk] = Field(default_factory=list)
