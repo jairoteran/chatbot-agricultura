@@ -89,7 +89,7 @@ def healthcheck() -> HealthResponse:
         ensure_service_initializing(force_rebuild=False)
         return HealthResponse(
             status="checking" if startup_error is None else "error",
-            detail=startup_error or "Inicializando servicio, cargando embeddings e indice documental...",
+            detail=startup_error or "Inicializando servicio y cargando el indice documental...",
             indexed_files=[],
             indexed_file_count=0,
             index_ready=False,

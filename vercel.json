@@ -6,7 +6,7 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/**/*.py": {
-      "excludeFiles": "{frontend/**,.git/**,.vscode/**,start-all.ps1,backend/.venv/**,backend/**/__pycache__/**}"
+      "excludeFiles": "{frontend/**,.git/**,.vscode/**,start-all.ps1,backend/.venv/**,backend/**/__pycache__/**,backend/data/**,backend/storage/default__vector_store.json,backend/storage/docstore.json,backend/storage/index_store.json,backend/storage/graph_store.json,backend/storage/image__vector_store.json}"
     }
   }
 }

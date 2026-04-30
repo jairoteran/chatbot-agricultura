@@ -7,18 +7,7 @@ import time
 import unicodedata
 from hashlib import sha256
 from pathlib import Path
-
-from llama_index.core import (
-    Settings,
-    SimpleDirectoryReader,
-    StorageContext,
-    VectorStoreIndex,
-    load_index_from_storage,
-)
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.core.node_parser import SentenceSplitter
-from google import genai
-from openai import OpenAI
+from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
@@ -192,7 +181,7 @@ RESPONSE_STYLE_GUIDANCE = {
 
 class RAGService:
     def __init__(self) -> None:
-        self.index: VectorStoreIndex | None = None
+        self.index: Any | None = None
         self.retriever = None
         self.indexed_files: list[str] = []
         self.chunk_cache: list[dict] = []
@@ -207,6 +196,8 @@ class RAGService:
             self.allow_reindex = True
         self.gemini_client = None
         self.openai_client = None
+        self.vector_backend_ready = False
+        self.embed_model_name = ""
         self._configure_llm_client()
         self._configure_embeddings()
         self.ensure_index_ready()
@@ -215,51 +206,89 @@ class RAGService:
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if gemini_api_key:
-            self.gemini_client = genai.Client(api_key=gemini_api_key)
-            self.response_mode = "generative-rag"
-            self.llm_provider = "gemini"
-            self.llm_model = GEMINI_MODEL
+            try:
+                from google import genai
+
+                self.gemini_client = genai.Client(api_key=gemini_api_key)
+                self.response_mode = "generative-rag"
+                self.llm_provider = "gemini"
+                self.llm_model = GEMINI_MODEL
+            except Exception:
+                self.gemini_client = None
             return
 
         if api_key:
-            self.openai_client = OpenAI(api_key=api_key)
-            self.response_mode = "generative-rag"
-            self.llm_provider = "openai"
-            self.llm_model = OPENAI_MODEL
+            try:
+                from openai import OpenAI
+
+                self.openai_client = OpenAI(api_key=api_key)
+                self.response_mode = "generative-rag"
+                self.llm_provider = "openai"
+                self.llm_model = OPENAI_MODEL
+            except Exception:
+                self.openai_client = None
 
     def _configure_embeddings(self) -> None:
         try:
+            from llama_index.core import Settings
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
             Settings.embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
+            self.vector_backend_ready = True
+            self.embed_model_name = EMBED_MODEL
         except Exception as exc:
-            raise RuntimeError(
-                "No fue posible cargar el modelo de embeddings. "
-                "Si es la primera ejecucion, verifica tu conexion a internet para descargar el modelo "
-                f"'{EMBED_MODEL}'. Detalle original: {exc}"
-            ) from exc
+            self.vector_backend_ready = False
+            self.embed_model_name = "lexical-only"
+            if self.deployment_mode == "local":
+                raise RuntimeError(
+                    "No fue posible cargar el modelo de embeddings. "
+                    "Si es la primera ejecucion, verifica tu conexion a internet para descargar el modelo "
+                    f"'{EMBED_MODEL}'. Detalle original: {exc}"
+                ) from exc
 
     def ensure_index_ready(self, force_rebuild: bool = False) -> None:
         started_at = time.perf_counter()
         self.index = self._load_or_build_index(force_rebuild=force_rebuild)
-        self.retriever = self.index.as_retriever(similarity_top_k=TOP_K)
+        self.retriever = (
+            self.index.as_retriever(similarity_top_k=TOP_K)
+            if self.index is not None
+            else None
+        )
         self.last_index_seconds = round(time.perf_counter() - started_at, 2)
 
-    def _load_or_build_index(self, force_rebuild: bool = False) -> VectorStoreIndex:
+    def _load_or_build_index(self, force_rebuild: bool = False) -> Any | None:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not force_rebuild and self._can_boot_from_chunk_cache_only():
+            manifest = self._read_manifest()
+            self.indexed_files = [item["file_name"] for item in manifest.get("files", [])]
+            self.chunk_cache = self._read_chunk_cache()
+            self.last_index_source = "chunk-cache"
+            return None
 
         documents = self._load_documents()
         current_manifest = self._build_manifest(documents)
         self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
 
         if not documents:
+            if self._has_chunk_cache():
+                self.chunk_cache = self._read_chunk_cache()
+                self.last_index_source = "chunk-cache"
+                if not self.indexed_files:
+                    stored_manifest = self._read_manifest()
+                    self.indexed_files = [item["file_name"] for item in stored_manifest.get("files", [])]
+                return None
+
             raise RuntimeError(
-                "No se encontraron archivos PDF en backend/data. "
-                "Agrega al menos un documento antes de iniciar el servicio."
+                "No se encontraron archivos PDF en backend/data ni un chunk_cache utilizable en backend/storage."
             )
 
         if not force_rebuild and self._has_usable_persisted_index(current_manifest):
+            from llama_index.core import StorageContext, load_index_from_storage
+
             storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
-            self.chunk_cache = json.loads(CHUNK_CACHE_FILE.read_text(encoding="utf-8"))
+            self.chunk_cache = self._read_chunk_cache()
             self.last_index_source = "storage"
             return load_index_from_storage(storage_context)
 
@@ -268,6 +297,14 @@ class RAGService:
                 "No se encontro un indice persistido utilizable para este despliegue. "
                 "En Vercel debes incluir backend/storage actualizado en el repositorio o habilitar ALLOW_RUNTIME_REINDEX."
             )
+
+        if not self.vector_backend_ready:
+            raise RuntimeError(
+                "No fue posible cargar el backend de embeddings necesario para reconstruir el indice."
+            )
+
+        from llama_index.core import VectorStoreIndex
+        from llama_index.core.node_parser import SentenceSplitter
 
         splitter = SentenceSplitter(chunk_size=700, chunk_overlap=120)
         nodes = splitter.get_nodes_from_documents(documents)
@@ -286,6 +323,8 @@ class RAGService:
         return index
 
     def _load_documents(self) -> list:
+        from llama_index.core import SimpleDirectoryReader
+
         return SimpleDirectoryReader(
             input_dir=str(DATA_DIR),
             required_exts=[".pdf"],
@@ -293,15 +332,35 @@ class RAGService:
             filename_as_id=True,
         ).load_data()
 
+    def _has_chunk_cache(self) -> bool:
+        return MANIFEST_FILE.exists() and CHUNK_CACHE_FILE.exists()
+
+    def _can_boot_from_chunk_cache_only(self) -> bool:
+        return self._has_chunk_cache() and (self.deployment_mode != "local" or not self.vector_backend_ready)
+
+    def _read_manifest(self) -> dict:
+        if not MANIFEST_FILE.exists():
+            return {"embed_model": self.embed_model_name, "files": []}
+        try:
+            return json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {"embed_model": self.embed_model_name, "files": []}
+
+    def _read_chunk_cache(self) -> list[dict]:
+        try:
+            return json.loads(CHUNK_CACHE_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("No fue posible leer backend/storage/chunk_cache.json.") from exc
+
     def _has_usable_persisted_index(self, current_manifest: dict) -> bool:
+        if not self.vector_backend_ready:
+            return False
+
         has_required_files = all((STORAGE_DIR / file_name).exists() for file_name in REQUIRED_STORAGE_FILES)
         if not has_required_files or not MANIFEST_FILE.exists() or not CHUNK_CACHE_FILE.exists():
             return False
 
-        try:
-            stored_manifest = json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return False
+        stored_manifest = self._read_manifest()
 
         return stored_manifest == current_manifest
 
@@ -338,10 +397,10 @@ class RAGService:
             "detail": "Servicio listo",
             "indexed_files": self.indexed_files,
             "indexed_file_count": len(self.indexed_files),
-            "index_ready": self.index is not None,
+            "index_ready": bool(self.chunk_cache),
             "index_source": self.last_index_source,
             "last_index_seconds": self.last_index_seconds,
-            "embed_model": EMBED_MODEL,
+            "embed_model": self.embed_model_name,
             "response_mode": self.response_mode,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
@@ -371,8 +430,8 @@ class RAGService:
         history: list[dict] | None = None,
         response_style: str = "academico",
     ) -> dict:
-        if self.retriever is None:
-            raise RuntimeError("El indice aun no esta listo.")
+        if not self.chunk_cache:
+            raise RuntimeError("El indice documental aun no esta listo.")
 
         small_talk_answer = self._small_talk_answer(question)
         if small_talk_answer:
@@ -501,6 +560,9 @@ class RAGService:
         return ""
 
     def _vector_candidates(self, question: str, keywords: set[str]) -> list[dict]:
+        if self.retriever is None:
+            return []
+
         ranked_nodes = []
 
         for node in self.retriever.retrieve(question):
