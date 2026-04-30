@@ -199,6 +199,13 @@ code {
   overflow-wrap: anywhere;
 }
 
+.status-inline-meta {
+  color: rgba(240, 217, 249, 0.72);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .status-card-label {
   color: rgba(248, 221, 244, 0.68);
   font-size: 0.74rem;

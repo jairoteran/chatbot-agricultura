@@ -91,6 +91,21 @@ function indexSourceSummary(source) {
   return "Inicializando";
 }
 
+function evidenceSummary(sources = []) {
+  if (!sources.length) {
+    return "Sin evidencia";
+  }
+
+  const topScore = Math.max(...sources.map((source) => Number(source.score) || 0));
+  if (sources.length >= 3 || topScore >= 0.9) {
+    return "Alta";
+  }
+  if (sources.length >= 2 || topScore >= 0.6) {
+    return "Media";
+  }
+  return "Baja";
+}
+
 function renderInlineFormatting(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
@@ -169,6 +184,12 @@ function App() {
     llm_model: "",
     deployment_mode: "local",
     allow_reindex: true,
+  });
+  const [lastResponseStats, setLastResponseStats] = useState({
+    label: "Sin consultas",
+    duration_ms: 0,
+    source_count: 0,
+    evidence: "Sin evidencia",
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -262,6 +283,7 @@ function App() {
     setMessages(nextMessages);
     setInput("");
     setIsLoading(true);
+    const startedAt = performance.now();
 
     try {
       const history = messages
@@ -284,6 +306,14 @@ function App() {
       if (!response.ok) {
         throw new Error(payload.detail || "No fue posible consultar el backend.");
       }
+
+      const sourceCount = (payload.sources || []).length;
+      setLastResponseStats({
+        label: "Ultima respuesta",
+        duration_ms: Math.round(performance.now() - startedAt),
+        source_count: sourceCount,
+        evidence: evidenceSummary(payload.sources || []),
+      });
 
       setMessages([
         ...nextMessages,
@@ -368,6 +398,7 @@ function App() {
     }
 
     setIsSummarizing(true);
+    const startedAt = performance.now();
 
     try {
       const response = await fetch(SUMMARY_URL, {
@@ -385,6 +416,14 @@ function App() {
       if (!response.ok) {
         throw new Error(payload.detail || "No fue posible resumir el documento.");
       }
+
+      const sourceCount = (payload.sources || []).length;
+      setLastResponseStats({
+        label: "Ultimo resumen",
+        duration_ms: Math.round(performance.now() - startedAt),
+        source_count: sourceCount,
+        evidence: evidenceSummary(payload.sources || []),
+      });
 
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -480,21 +519,28 @@ function App() {
           </div>
           <div className="status-highlights">
             <div className="status-card">
-              <span className="status-card-label">Indice</span>
-              <strong>{indexSourceLabel}</strong>
-            </div>
-            <div className="status-card">
-              <span className="status-card-label">Arranque</span>
+              <span className="status-card-label">Tiempo de respuesta</span>
               <strong>
-                {backendStatus.last_index_seconds > 0
-                  ? `${backendStatus.last_index_seconds.toFixed(2)} s`
+                {lastResponseStats.duration_ms > 0
+                  ? `${lastResponseStats.duration_ms} ms`
                   : "--"}
               </strong>
             </div>
+            <div className="status-card">
+              <span className="status-card-label">Fuentes usadas</span>
+              <strong>{lastResponseStats.source_count || "--"}</strong>
+            </div>
           </div>
           <div className="status-card status-card-wide">
-            <span className="status-card-label">Modelo activo</span>
-            <strong>{activeModelLabel}</strong>
+            <span className="status-card-label">Nivel de evidencia</span>
+            <strong>{lastResponseStats.evidence}</strong>
+          </div>
+          <div className="status-card status-card-wide">
+            <span className="status-card-label">Contexto tecnico</span>
+            <strong>{responseModeLabel}</strong>
+            <span className="status-inline-meta">
+              {deploymentLabelText} · {indexSourceLabel} · {activeModelLabel}
+            </span>
           </div>
           {!canReindex && (
             <p className="status-meta">
