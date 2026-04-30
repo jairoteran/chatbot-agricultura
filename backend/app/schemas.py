@@ -35,6 +35,10 @@ class ChatResponse(BaseModel):
     answer: str
     found: bool
     sources: list[SourceChunk] = Field(default_factory=list)
+    response_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
 
 
 class HealthResponse(BaseModel):
@@ -52,6 +56,11 @@ class HealthResponse(BaseModel):
     llm_model: str = ""
     deployment_mode: str = "local"
     allow_reindex: bool = True
+    last_interaction_label: str = "Sin consultas"
+    last_response_ms: int = 0
+    last_input_tokens: int = 0
+    last_output_tokens: int = 0
+    last_total_tokens: int = 0
 
 
 class ReindexResponse(BaseModel):
@@ -78,3 +87,7 @@ class DocumentSummaryResponse(BaseModel):
     answer: str
     found: bool
     sources: list[SourceChunk] = Field(default_factory=list)
+    response_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0

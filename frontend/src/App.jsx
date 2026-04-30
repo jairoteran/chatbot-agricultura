@@ -174,6 +174,11 @@ function App() {
     llm_model: "",
     deployment_mode: "local",
     allow_reindex: true,
+    last_interaction_label: "Sin consultas",
+    last_response_ms: 0,
+    last_input_tokens: 0,
+    last_output_tokens: 0,
+    last_total_tokens: 0,
   });
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -236,6 +241,11 @@ function App() {
           llm_model: "",
           deployment_mode: "local",
           allow_reindex: true,
+          last_interaction_label: "Sin consultas",
+          last_response_ms: 0,
+          last_input_tokens: 0,
+          last_output_tokens: 0,
+          last_total_tokens: 0,
         });
       } finally {
         if (!active) {
@@ -300,6 +310,14 @@ function App() {
           sources: payload.sources || [],
         },
       ]);
+      setBackendStatus((currentStatus) => ({
+        ...currentStatus,
+        last_interaction_label: "Ultima respuesta",
+        last_response_ms: payload.response_ms || 0,
+        last_input_tokens: payload.input_tokens || 0,
+        last_output_tokens: payload.output_tokens || 0,
+        last_total_tokens: payload.total_tokens || 0,
+      }));
     } catch (error) {
       const fallbackMessage =
         error instanceof TypeError
@@ -405,6 +423,14 @@ function App() {
           sources: payload.sources || [],
         },
       ]);
+      setBackendStatus((currentStatus) => ({
+        ...currentStatus,
+        last_interaction_label: "Ultimo resumen",
+        last_response_ms: payload.response_ms || 0,
+        last_input_tokens: payload.input_tokens || 0,
+        last_output_tokens: payload.output_tokens || 0,
+        last_total_tokens: payload.total_tokens || 0,
+      }));
     } catch (error) {
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -474,6 +500,35 @@ function App() {
               <strong>{deploymentLabel(backendStatus.deployment_mode)}</strong>
             </div>
           </div>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Velocidad</span>
+              <strong>
+                {backendStatus.last_response_ms > 0
+                  ? `${backendStatus.last_response_ms} ms`
+                  : "--"}
+              </strong>
+            </div>
+            <div className="status-card">
+              <span className="status-card-label">Uso</span>
+              <strong>
+                {backendStatus.last_total_tokens > 0
+                  ? `${backendStatus.last_total_tokens} tokens`
+                  : "--"}
+              </strong>
+            </div>
+          </div>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Disponibles</span>
+              <strong>
+                No disponible
+              </strong>
+            </div>
+          </div>
+          <p className="status-meta">
+            {backendStatus.last_interaction_label}
+          </p>
           {!backendStatus.allow_reindex && (
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.

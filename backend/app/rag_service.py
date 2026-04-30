@@ -210,6 +210,12 @@ class RAGService:
         self.openai_client = None
         self.vector_backend_ready = False
         self.embed_model_name = ""
+        self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        self.last_interaction_label = "Sin consultas"
+        self.last_response_ms = 0
+        self.last_input_tokens = 0
+        self.last_output_tokens = 0
+        self.last_total_tokens = 0
         self._configure_llm_client()
         self._configure_embeddings()
         self.ensure_index_ready()
@@ -427,6 +433,11 @@ class RAGService:
             "llm_model": self.llm_model,
             "deployment_mode": self.deployment_mode,
             "allow_reindex": self.allow_reindex,
+            "last_interaction_label": self.last_interaction_label,
+            "last_response_ms": self.last_response_ms,
+            "last_input_tokens": self.last_input_tokens,
+            "last_output_tokens": self.last_output_tokens,
+            "last_total_tokens": self.last_total_tokens,
         }
 
     def reindex(self) -> dict:
@@ -452,16 +463,20 @@ class RAGService:
         history: list[dict] | None = None,
         response_style: str = "academico",
     ) -> dict:
+        started_at = time.perf_counter()
+        self._reset_current_usage()
         if not self.chunk_cache:
             raise RuntimeError("El indice documental aun no esta listo.")
 
         small_talk_answer = self._small_talk_answer(question)
         if small_talk_answer:
-            return {
+            result = {
                 "answer": small_talk_answer,
                 "found": True,
                 "sources": [],
             }
+            self._record_interaction_metrics("Ultima respuesta", started_at)
+            return {**result, **self._current_response_metrics()}
 
         keywords = self._extract_keywords(question)
         vector_candidates = self._vector_candidates(question, keywords)
@@ -473,7 +488,7 @@ class RAGService:
         ] or merged_candidates[:3]
 
         if not filtered_nodes:
-            return {
+            result = {
                 "answer": (
                     "No se encontro informacion suficiente en los documentos cargados "
                     "para responder esa pregunta."
@@ -481,6 +496,8 @@ class RAGService:
                 "found": False,
                 "sources": [],
             }
+            self._record_interaction_metrics("Ultima respuesta", started_at)
+            return {**result, **self._current_response_metrics()}
 
         source_chunks = []
         evidence_blocks = []
@@ -504,7 +521,7 @@ class RAGService:
             evidence_blocks.append((file_name, page_label, score, normalized_text))
 
         if not any(item["keyword_overlap"] > 0 for item in filtered_nodes):
-            return {
+            result = {
                 "answer": (
                     "No se encontro informacion suficientemente relacionada con la pregunta "
                     "dentro de los documentos cargados."
@@ -512,6 +529,8 @@ class RAGService:
                 "found": False,
                 "sources": [],
             }
+            self._record_interaction_metrics("Ultima respuesta", started_at)
+            return {**result, **self._current_response_metrics()}
 
         answer = self._compose_answer(
             question,
@@ -520,13 +539,17 @@ class RAGService:
             response_style=response_style,
         )
 
-        return {
+        result = {
             "answer": answer,
             "found": True,
             "sources": source_chunks,
         }
+        self._record_interaction_metrics("Ultima respuesta", started_at)
+        return {**result, **self._current_response_metrics()}
 
     def summarize_document(self, file_name: str, response_style: str = "academico") -> dict:
+        started_at = time.perf_counter()
+        self._reset_current_usage()
         matching_chunks = [
             chunk for chunk in self.chunk_cache if chunk["file_name"].strip().lower() == file_name.strip().lower()
         ]
@@ -569,13 +592,15 @@ class RAGService:
             history=[],
             response_style=response_style,
         )
-        return {
+        result = {
             "file_name": selected_chunks[0]["file_name"],
             "display_title": self._display_title(selected_chunks[0]["file_name"]),
             "answer": answer,
             "found": True,
             "sources": sources,
         }
+        self._record_interaction_metrics("Ultimo resumen", started_at)
+        return {**result, **self._current_response_metrics()}
 
     def _small_talk_answer(self, question: str) -> str:
         normalized_question = " ".join(question.strip().split())
@@ -688,6 +713,48 @@ class RAGService:
             }
             for file_name in self.indexed_files
         ]
+
+    def _reset_current_usage(self) -> None:
+        self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+    def _record_interaction_metrics(self, label: str, started_at: float) -> None:
+        self.last_interaction_label = label
+        self.last_response_ms = int((time.perf_counter() - started_at) * 1000)
+        self.last_input_tokens = int(self._current_usage.get("input_tokens", 0) or 0)
+        self.last_output_tokens = int(self._current_usage.get("output_tokens", 0) or 0)
+        self.last_total_tokens = int(self._current_usage.get("total_tokens", 0) or 0)
+
+    def _current_response_metrics(self) -> dict:
+        return {
+            "response_ms": self.last_response_ms,
+            "input_tokens": self.last_input_tokens,
+            "output_tokens": self.last_output_tokens,
+            "total_tokens": self.last_total_tokens,
+        }
+
+    def _capture_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            prompt = int(getattr(usage, "prompt_token_count", 0) or 0)
+            candidates = int(getattr(usage, "candidates_token_count", 0) or 0)
+            total = int(getattr(usage, "total_token_count", prompt + candidates) or 0)
+            self._current_usage = {
+                "input_tokens": prompt,
+                "output_tokens": candidates,
+                "total_tokens": total,
+            }
+            return
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            prompt = int(getattr(usage, "input_tokens", 0) or 0)
+            completion = int(getattr(usage, "output_tokens", 0) or 0)
+            total = int(getattr(usage, "total_tokens", prompt + completion) or 0)
+            self._current_usage = {
+                "input_tokens": prompt,
+                "output_tokens": completion,
+                "total_tokens": total,
+            }
 
     def _display_title(self, file_name: str) -> str:
         stem = Path(file_name).stem.strip()
@@ -899,10 +966,12 @@ class RAGService:
                     model=self.llm_model,
                     contents=prompt,
                 )
+                self._capture_usage(response)
                 output_text = getattr(response, "text", "") or ""
                 return output_text.strip()
 
             response = self.openai_client.responses.create(model=self.llm_model, input=prompt)
+            self._capture_usage(response)
         except Exception:
             return ""
 
