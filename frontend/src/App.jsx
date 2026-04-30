@@ -485,7 +485,6 @@ function App() {
     >
       <motion.aside className="sidebar" variants={panelVariants}>
         <div>
-          <p className="eyebrow">PDF Chat</p>
           <h1>Asistente documental</h1>
           <p className="sidebar-copy">
             Consulta tus documentos y recibe respuestas mas claras y directas.
