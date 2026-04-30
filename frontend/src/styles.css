@@ -274,10 +274,6 @@ code {
   grid-template-rows: auto auto auto;
 }
 
-.toolbar-group-compare {
-  grid-template-columns: 1fr;
-}
-
 .toolbar-tip {
   margin: 0;
   color: #e7d5f6;
@@ -302,11 +298,6 @@ code {
   color: #f4e8ff;
   background: rgba(69, 43, 97, 0.96);
   text-overflow: ellipsis;
-}
-
-.compare-select {
-  min-height: 132px;
-  padding-right: 0.35rem;
 }
 
 .secondary-button {

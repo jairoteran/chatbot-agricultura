@@ -31,11 +31,6 @@ class IndexedDocument(BaseModel):
     display_title: str
 
 
-class DocumentCategory(BaseModel):
-    label: str
-    documents: list[IndexedDocument] = Field(default_factory=list)
-
-
 class ChatResponse(BaseModel):
     answer: str
     found: bool
@@ -61,7 +56,6 @@ class HealthResponse(BaseModel):
     llm_model: str = ""
     deployment_mode: str = "local"
     allow_reindex: bool = True
-    document_categories: list[DocumentCategory] = Field(default_factory=list)
     last_interaction_label: str = "Sin consultas"
     last_response_ms: int = 0
     last_input_tokens: int = 0
@@ -74,7 +68,6 @@ class ReindexResponse(BaseModel):
     detail: str
     indexed_files: list[str] = Field(default_factory=list)
     indexed_documents: list[IndexedDocument] = Field(default_factory=list)
-    document_categories: list[DocumentCategory] = Field(default_factory=list)
     index_source: str = "rebuild"
     last_index_seconds: float = 0.0
 
@@ -88,31 +81,11 @@ class DocumentSummaryRequest(BaseModel):
     )
 
 
-class CompareDocumentsRequest(BaseModel):
-    file_names: list[str] = Field(..., min_length=2, max_length=4)
-    response_style: str = Field(
-        default="academico",
-        pattern=RESPONSE_STYLE_PATTERN,
-        description="Estilo de comparacion: academico, simple o tecnico",
-    )
-
-
 class DocumentSummaryResponse(BaseModel):
     file_name: str
     display_title: str = ""
     answer: str
     found: bool
-    sources: list[SourceChunk] = Field(default_factory=list)
-    response_ms: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-
-
-class CompareDocumentsResponse(BaseModel):
-    answer: str
-    found: bool
-    compared_documents: list[IndexedDocument] = Field(default_factory=list)
     sources: list[SourceChunk] = Field(default_factory=list)
     response_ms: int = 0
     input_tokens: int = 0

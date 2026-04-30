@@ -5,7 +5,6 @@ const CHAT_URL = import.meta.env.VITE_API_URL || "/api/chat";
 const HEALTH_URL = import.meta.env.VITE_HEALTH_URL || "/api/health";
 const REINDEX_URL = import.meta.env.VITE_REINDEX_URL || "/api/reindex";
 const SUMMARY_URL = import.meta.env.VITE_SUMMARY_URL || "/api/summarize-document";
-const COMPARE_URL = import.meta.env.VITE_COMPARE_URL || "/api/compare-documents";
 
 const initialMessage = {
   role: "assistant",
@@ -158,10 +157,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isReindexing, setIsReindexing] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [isComparing, setIsComparing] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [compareSelection, setCompareSelection] = useState([]);
   const [responseStyle, setResponseStyle] = useState("academico");
   const [backendStatus, setBackendStatus] = useState({
     status: "checking",
@@ -178,7 +174,6 @@ function App() {
     llm_model: "",
     deployment_mode: "local",
     allow_reindex: true,
-    document_categories: [],
     last_interaction_label: "Sin consultas",
     last_response_ms: 0,
     last_input_tokens: 0,
@@ -189,16 +184,6 @@ function App() {
   const textareaRef = useRef(null);
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
   const indexedDocuments = normalizeIndexedDocuments(backendStatus);
-  const categoryOptions = backendStatus.document_categories || [];
-  const visibleDocuments =
-    selectedCategory === "all"
-      ? indexedDocuments
-      : indexedDocuments.filter((document) =>
-          categoryOptions
-            .find((category) => category.label === selectedCategory)
-            ?.documents.some((item) => item.file_name === document.file_name),
-        );
-  const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -213,28 +198,6 @@ function App() {
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   }, [input]);
-
-  useEffect(() => {
-    if (!visibleDocuments.length) {
-      setSelectedDocument("");
-      return;
-    }
-
-    if (!visibleDocuments.some((document) => document.file_name === selectedDocument)) {
-      setSelectedDocument(visibleDocuments[0].file_name);
-    }
-  }, [selectedDocument, visibleDocuments]);
-
-  useEffect(() => {
-    setCompareSelection((currentSelection) => {
-      const visibleNames = new Set(visibleDocuments.map((document) => document.file_name));
-      const nextSelection = currentSelection.filter((fileName) => visibleNames.has(fileName));
-      if (nextSelection.length > 0) {
-        return nextSelection;
-      }
-      return visibleDocuments.slice(0, 2).map((document) => document.file_name);
-    });
-  }, [visibleDocuments]);
 
   useEffect(() => {
     let active = true;
@@ -278,7 +241,6 @@ function App() {
           llm_model: "",
           deployment_mode: "local",
           allow_reindex: true,
-          document_categories: [],
           last_interaction_label: "Sin consultas",
           last_response_ms: 0,
           last_input_tokens: 0,
@@ -397,7 +359,6 @@ function App() {
         detail: payload.detail,
         indexed_files: payload.indexed_files || [],
         indexed_documents: payload.indexed_documents || [],
-        document_categories: payload.document_categories || currentStatus.document_categories,
         indexed_file_count: (payload.indexed_files || []).length,
         index_ready: true,
       }));
@@ -487,137 +448,6 @@ function App() {
     }
   }
 
-  async function handleCompareDocuments() {
-    if (compareSelection.length < 2 || isComparing || !backendReady) {
-      return;
-    }
-
-    setIsComparing(true);
-
-    try {
-      const response = await fetch(COMPARE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file_names: compareSelection,
-          response_style: responseStyle,
-        }),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.detail || "No fue posible comparar los documentos.");
-      }
-
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          role: "assistant",
-          content: payload.answer,
-          sources: payload.sources || [],
-        },
-      ]);
-      setBackendStatus((currentStatus) => ({
-        ...currentStatus,
-        last_interaction_label: "Comparacion",
-        last_response_ms: payload.response_ms || 0,
-        last_input_tokens: payload.input_tokens || 0,
-        last_output_tokens: payload.output_tokens || 0,
-        last_total_tokens: payload.total_tokens || 0,
-      }));
-    } catch (error) {
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          role: "assistant",
-          content: error.message || "No fue posible comparar los documentos.",
-          sources: [],
-        },
-      ]);
-    } finally {
-      setIsComparing(false);
-    }
-  }
-
-  function handleCompareSelectionChange(event) {
-    const nextSelection = Array.from(event.target.selectedOptions)
-      .map((option) => option.value)
-      .slice(0, 4);
-    setCompareSelection(nextSelection);
-  }
-
-  async function handleExportPdf() {
-    if (!lastAssistantMessage?.content) {
-      return;
-    }
-
-    const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({
-      unit: "pt",
-      format: "a4",
-    });
-
-    const margin = 48;
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const maxWidth = pageWidth - margin * 2;
-    let cursorY = 56;
-
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(16);
-    pdf.text("Asistente documental", margin, cursorY);
-    cursorY += 28;
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(11);
-    const bodyLines = pdf.splitTextToSize(lastAssistantMessage.content, maxWidth);
-    bodyLines.forEach((line) => {
-      if (cursorY > pageHeight - 56) {
-        pdf.addPage();
-        cursorY = 56;
-      }
-      pdf.text(line, margin, cursorY);
-      cursorY += 14;
-    });
-
-    if (lastAssistantMessage.sources?.length) {
-      cursorY += 12;
-      if (cursorY > pageHeight - 56) {
-        pdf.addPage();
-        cursorY = 56;
-      }
-      pdf.setFont("helvetica", "bold");
-      pdf.text("Fuentes utilizadas", margin, cursorY);
-      cursorY += 18;
-      pdf.setFont("helvetica", "normal");
-
-      const sourceLines = [
-        ...new Map(
-          lastAssistantMessage.sources.map((source) => [
-            `${source.file_name}-${source.page_label}`,
-            `${source.display_title || source.file_name}${source.page_label ? ` - Pagina ${source.page_label}` : ""}`,
-          ]),
-        ).values(),
-      ];
-
-      sourceLines.forEach((line) => {
-        const wrapped = pdf.splitTextToSize(`- ${line}`, maxWidth);
-        wrapped.forEach((segment) => {
-          if (cursorY > pageHeight - 56) {
-            pdf.addPage();
-            cursorY = 56;
-          }
-          pdf.text(segment, margin, cursorY);
-          cursorY += 14;
-        });
-      });
-    }
-
-    pdf.save("respuesta-asistente-documental.pdf");
-  }
-
   function handleKeyDown(event) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -688,9 +518,7 @@ function App() {
               </strong>
             </div>
           </div>
-          <p className="status-meta">
-            {backendStatus.last_interaction_label}
-          </p>
+          <p className="status-meta">{backendStatus.last_interaction_label}</p>
           {!backendStatus.allow_reindex && (
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.
@@ -731,29 +559,7 @@ function App() {
               </select>
             </div>
 
-            {categoryOptions.length > 0 && (
-              <div className="toolbar-group toolbar-group-style">
-                <label className="summary-label" htmlFor="category-select">
-                  Clasificacion
-                </label>
-                <select
-                  id="category-select"
-                  className="summary-select toolbar-select"
-                  value={selectedCategory}
-                  onChange={(event) => setSelectedCategory(event.target.value)}
-                  disabled={!backendReady}
-                >
-                  <option value="all">Todas las categorias</option>
-                  {categoryOptions.map((category) => (
-                    <option key={category.label} value={category.label}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {visibleDocuments.length > 0 && (
+            {indexedDocuments.length > 0 && (
               <div className="toolbar-group toolbar-group-summary">
                 <label className="summary-label" htmlFor="document-summary-select">
                   Resumir documento
@@ -765,7 +571,7 @@ function App() {
                   onChange={(event) => setSelectedDocument(event.target.value)}
                   disabled={!backendReady || isSummarizing}
                 >
-                  {visibleDocuments.map((document) => (
+                  {indexedDocuments.map((document) => (
                     <option
                       key={document.file_name}
                       value={document.file_name}
@@ -786,49 +592,10 @@ function App() {
               </div>
             )}
 
-            {visibleDocuments.length > 1 && (
-              <div className="toolbar-group toolbar-group-compare">
-                <label className="summary-label" htmlFor="compare-select">
-                  Resumen comparativo
-                </label>
-                <select
-                  id="compare-select"
-                  className="summary-select toolbar-select compare-select"
-                  multiple
-                  size={Math.min(Math.max(visibleDocuments.length, 2), 4)}
-                  value={compareSelection}
-                  onChange={handleCompareSelectionChange}
-                  disabled={!backendReady || isComparing}
-                >
-                  {visibleDocuments.map((document) => (
-                    <option key={document.file_name} value={document.file_name}>
-                      {compactLabel(document.display_title || document.file_name, 54)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="secondary-button toolbar-button"
-                  type="button"
-                  onClick={handleCompareDocuments}
-                  disabled={!backendReady || compareSelection.length < 2 || isComparing}
-                >
-                  {isComparing ? "Comparando..." : "Comparar seleccionados"}
-                </button>
-              </div>
-            )}
-
             <div className="toolbar-group toolbar-group-help">
               <span className="summary-label">Ayuda breve</span>
               <p className="toolbar-tip">Enter para enviar</p>
               <p className="toolbar-tip">Shift + Enter para salto de linea</p>
-              <button
-                className="secondary-button toolbar-button"
-                type="button"
-                onClick={handleExportPdf}
-                disabled={!lastAssistantMessage?.content}
-              >
-                Exportar a PDF
-              </button>
             </div>
 
             {backendStatus.allow_reindex && (
