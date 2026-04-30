@@ -537,6 +537,12 @@ function App() {
               </div>
             )}
 
+            <div className="toolbar-group toolbar-group-help">
+              <span className="summary-label">Ayuda breve</span>
+              <p className="toolbar-tip">Enter para enviar</p>
+              <p className="toolbar-tip">Shift + Enter para salto de linea</p>
+            </div>
+
             {canReindex && (
               <div className="toolbar-group toolbar-group-reindex">
                 <label className="summary-label" htmlFor="reindex-button">
