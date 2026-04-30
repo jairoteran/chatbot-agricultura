@@ -121,6 +121,13 @@ GENERIC_TOPIC_WORDS = {
     "texto",
     "textos",
 }
+DOCUMENT_CATEGORY_RULES = [
+    ("Papa y tuberculos", {"papa", "papas", "tuberculos", "tuberculo", "raices", "raiz"}),
+    ("Saberes ancestrales", {"ancestral", "ancestrales", "saberes", "identidad", "practicas"}),
+    ("Agroecologia", {"agroecologia", "agroecologico", "agroecologica"}),
+    ("Produccion agricola", {"produccion", "cultivo", "cultivos", "agricola", "agricultura", "chakra"}),
+    ("Politica y territorio", {"agenda", "diagnosticos", "territoriales", "sector", "agrario"}),
+]
 SMALL_TALK_PATTERNS = [
     (
         re.compile(r"^(hola|buenas|buenos dias|buen dia|buenas tardes|buenas noches)[!. ]*$", re.IGNORECASE),
@@ -433,6 +440,7 @@ class RAGService:
             "llm_model": self.llm_model,
             "deployment_mode": self.deployment_mode,
             "allow_reindex": self.allow_reindex,
+            "document_categories": self._categorized_documents_payload(),
             "last_interaction_label": self.last_interaction_label,
             "last_response_ms": self.last_response_ms,
             "last_input_tokens": self.last_input_tokens,
@@ -453,6 +461,7 @@ class RAGService:
             "detail": "Indice reconstruido correctamente",
             "indexed_files": self.indexed_files,
             "indexed_documents": self._indexed_documents_payload(),
+            "document_categories": self._categorized_documents_payload(),
             "index_source": self.last_index_source,
             "last_index_seconds": self.last_index_seconds,
         }
@@ -602,6 +611,79 @@ class RAGService:
         self._record_interaction_metrics("Ultimo resumen", started_at)
         return {**result, **self._current_response_metrics()}
 
+    def compare_documents(self, file_names: list[str], response_style: str = "academico") -> dict:
+        started_at = time.perf_counter()
+        self._reset_current_usage()
+        normalized_requested = {file_name.strip().lower() for file_name in file_names if file_name.strip()}
+        if len(normalized_requested) < 2:
+            raise ValueError("Debes seleccionar al menos dos documentos para comparar.")
+
+        selected_chunks = [
+            chunk
+            for chunk in self.chunk_cache
+            if chunk["file_name"].strip().lower() in normalized_requested
+        ]
+        if not selected_chunks:
+            raise ValueError("No se encontraron los documentos seleccionados para comparar.")
+
+        chunks_by_document: dict[str, list[dict]] = {}
+        for chunk in selected_chunks:
+            chunks_by_document.setdefault(chunk["file_name"], []).append(chunk)
+
+        if len(chunks_by_document) < 2:
+            raise ValueError("Se necesitan al menos dos documentos con contenido indexado para comparar.")
+
+        compared_documents = [
+            {
+                "file_name": file_name,
+                "display_title": self._display_title(file_name),
+            }
+            for file_name in sorted(chunks_by_document)
+        ]
+
+        evidence_blocks = []
+        sources = []
+        for file_name, chunks in chunks_by_document.items():
+            for chunk in self._select_summary_chunks(chunks)[:2]:
+                excerpt = chunk["text"][:650]
+                page_label = chunk.get("page_label", "")
+                evidence_blocks.append((file_name, page_label, 1.0, chunk["text"]))
+                sources.append(
+                    {
+                        "file_name": file_name,
+                        "display_title": self._display_title(file_name),
+                        "page_label": page_label,
+                        "score": 1.0,
+                        "text": excerpt,
+                    }
+                )
+
+        titles = ", ".join(document["display_title"] for document in compared_documents)
+        style_config = self._style_config(response_style)
+        prompt = (
+            f"Compara los siguientes documentos: {titles}.\n"
+            "Debes responder en espanol con una comparacion clara.\n"
+            f"{style_config['summary_instruction']}\n"
+            "Organiza la salida con estas secciones si aportan claridad: **Coincidencias**, **Diferencias**, **Conclusion**.\n"
+            "Menciona puntos practicos y evita copiar textualmente los fragmentos.\n"
+        )
+
+        answer = self._compose_answer(
+            prompt,
+            evidence_blocks,
+            history=[],
+            response_style=response_style,
+        )
+
+        result = {
+            "answer": answer,
+            "found": True,
+            "compared_documents": compared_documents,
+            "sources": sources[:8],
+        }
+        self._record_interaction_metrics("Comparacion", started_at)
+        return {**result, **self._current_response_metrics()}
+
     def _small_talk_answer(self, question: str) -> str:
         normalized_question = " ".join(question.strip().split())
         for pattern, answer in SMALL_TALK_PATTERNS:
@@ -713,6 +795,42 @@ class RAGService:
             }
             for file_name in self.indexed_files
         ]
+
+    def _categorized_documents_payload(self) -> list[dict]:
+        grouped: dict[str, list[dict]] = {}
+        for file_name in self.indexed_files:
+            label = self._category_for_document(file_name)
+            grouped.setdefault(label, []).append(
+                {
+                    "file_name": file_name,
+                    "display_title": self._display_title(file_name),
+                }
+            )
+
+        return [
+            {
+                "label": label,
+                "documents": sorted(documents, key=lambda item: item["display_title"].lower()),
+            }
+            for label, documents in sorted(
+                grouped.items(),
+                key=lambda item: (-len(item[1]), item[0]),
+            )
+        ]
+
+    def _category_for_document(self, file_name: str) -> str:
+        normalized = self._normalize_text(self._display_title(file_name))
+        tokens = set(re.findall(r"[a-z0-9]+", normalized))
+
+        best_label = "Otros documentos"
+        best_score = 0
+        for label, keywords in DOCUMENT_CATEGORY_RULES:
+            score = len(tokens & keywords)
+            if score > best_score:
+                best_label = label
+                best_score = score
+
+        return best_label
 
     def _reset_current_usage(self) -> None:
         self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}

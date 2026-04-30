@@ -10,6 +10,8 @@ from app.rag_service import RAGService
 from app.schemas import (
     ChatRequest,
     ChatResponse,
+    CompareDocumentsRequest,
+    CompareDocumentsResponse,
     DocumentSummaryRequest,
     DocumentSummaryResponse,
     HealthResponse,
@@ -157,3 +159,25 @@ def summarize_document(payload: DocumentSummaryRequest) -> DocumentSummaryRespon
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return DocumentSummaryResponse(**result)
+
+
+@app.post("/compare-documents", response_model=CompareDocumentsResponse)
+def compare_documents(payload: CompareDocumentsRequest) -> CompareDocumentsResponse:
+    if rag_service is None:
+        ensure_service_initializing(force_rebuild=False)
+        raise HTTPException(
+            status_code=503,
+            detail=startup_error or "El servicio aun se esta inicializando. Espera a que /health indique que esta listo.",
+        )
+
+    try:
+        result = rag_service.compare_documents(
+            payload.file_names,
+            response_style=payload.response_style,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return CompareDocumentsResponse(**result)
