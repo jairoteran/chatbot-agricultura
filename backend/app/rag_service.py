@@ -179,6 +179,18 @@ RESPONSE_STYLE_GUIDANCE = {
 }
 
 
+def _detect_deployment_mode() -> str:
+    if os.getenv("VERCEL") == "1":
+        return "vercel"
+    if os.getenv("RENDER") == "true":
+        return "render"
+    if os.getenv("RAILWAY_ENVIRONMENT"):
+        return "railway"
+    if os.getenv("FLY_APP_NAME"):
+        return "fly"
+    return "local"
+
+
 class RAGService:
     def __init__(self) -> None:
         self.index: Any | None = None
@@ -190,7 +202,7 @@ class RAGService:
         self.response_mode = "extractive"
         self.llm_provider = ""
         self.llm_model = ""
-        self.deployment_mode = "vercel" if os.getenv("VERCEL") == "1" else "local"
+        self.deployment_mode = _detect_deployment_mode()
         self.allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower() in {"1", "true", "yes"}
         if self.deployment_mode == "local" and not os.getenv("ALLOW_RUNTIME_REINDEX"):
             self.allow_reindex = True
@@ -229,6 +241,11 @@ class RAGService:
                 self.openai_client = None
 
     def _configure_embeddings(self) -> None:
+        if not self._should_prepare_vector_backend():
+            self.vector_backend_ready = False
+            self.embed_model_name = "lexical-only"
+            return
+
         try:
             from llama_index.core import Settings
             from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -239,7 +256,7 @@ class RAGService:
         except Exception as exc:
             self.vector_backend_ready = False
             self.embed_model_name = "lexical-only"
-            if self.deployment_mode == "local":
+            if self.deployment_mode == "local" and not self._has_chunk_cache():
                 raise RuntimeError(
                     "No fue posible cargar el modelo de embeddings. "
                     "Si es la primera ejecucion, verifica tu conexion a internet para descargar el modelo "
@@ -335,8 +352,11 @@ class RAGService:
     def _has_chunk_cache(self) -> bool:
         return MANIFEST_FILE.exists() and CHUNK_CACHE_FILE.exists()
 
+    def _should_prepare_vector_backend(self) -> bool:
+        return self.deployment_mode == "local" or self.allow_reindex
+
     def _can_boot_from_chunk_cache_only(self) -> bool:
-        return self._has_chunk_cache() and (self.deployment_mode != "local" or not self.vector_backend_ready)
+        return self._has_chunk_cache() and not self._should_prepare_vector_backend()
 
     def _read_manifest(self) -> dict:
         if not MANIFEST_FILE.exists():

@@ -448,7 +448,17 @@ function App() {
           )}
           <p className="status-meta">{responseModeLabel}</p>
           <p className="status-meta">
-            Despliegue: {backendStatus.deployment_mode === "vercel" ? "Vercel" : "Local"}
+            Despliegue: {
+              backendStatus.deployment_mode === "vercel"
+                ? "Vercel"
+                : backendStatus.deployment_mode === "render"
+                  ? "Render"
+                  : backendStatus.deployment_mode === "railway"
+                    ? "Railway"
+                    : backendStatus.deployment_mode === "fly"
+                      ? "Fly.io"
+                      : "Local"
+            }
           </p>
           {!canReindex && (
             <p className="status-meta">

@@ -51,6 +51,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+Ese archivo instala solo las dependencias necesarias para ejecutar el backend en despliegues ligeros como `Render` o `Vercel`.
+
+Si tambien quieres reconstruir el indice localmente desde los PDFs, instala ademas:
+
+```powershell
+pip install -r requirements.indexing.txt
+```
+
 ### 3. Configurar el modo conversacional con LLM
 
 Si quieres que el asistente razone y redacte como un chatbot real, configura una clave de API en el backend.
@@ -102,6 +110,12 @@ Endpoints disponibles:
 - `GET /health`: estado del backend, cantidad de archivos indexados y diagnostico.
 - `POST /chat`: responde preguntas usando solo el contenido recuperado de los PDFs, pero sintetizando los hallazgos en un lenguaje mas claro en lugar de devolver citas literales como respuesta principal.
 - `POST /reindex`: reconstruye el indice cuando agregas o cambias documentos.
+
+Importante:
+
+- en produccion el backend puede arrancar usando `backend/storage/chunk_cache.json` sin cargar el stack pesado de embeddings;
+- eso reduce mucho el tiempo de inicio y evita instalar dependencias grandes que no se usan en cada arranque;
+- para volver a generar `backend/storage/` desde cero si cambias PDFs, hazlo localmente con `requirements.indexing.txt` y luego sube los archivos actualizados.
 
 Ejemplo de cuerpo JSON para `/chat`:
 
@@ -411,6 +425,22 @@ Para dejar el proyecto listo para subir:
 1. Usar `Gemini` como opcion principal para pruebas porque ya esta integrado en el backend y puede aprovechar el free tier.
 2. Usar `Gemini` como primera opcion para pruebas y validacion inicial.
 3. Mantener `OpenAI` como respaldo opcional cuando quieras comparar calidad o comportamiento.
+
+## Hace falta una base de datos?
+
+No necesariamente.
+
+Con la arquitectura actual no hace falta una base de datos para responder preguntas sobre tus PDFs, porque el proyecto ya persiste lo necesario en archivos dentro de `backend/storage/`.
+
+Una base de datos solo seria recomendable si luego quieres alguna de estas cosas:
+
+- permitir que usuarios suban archivos desde la web;
+- guardar historial de conversaciones;
+- manejar multiples usuarios o autenticacion;
+- administrar documentos sin depender del repositorio Git;
+- reindexar contenido dinamico desde produccion.
+
+Para el estado actual del proyecto, mantener `backend/storage/` versionado en Git es mas simple y mas barato que agregar una base de datos.
 
 ## Nota importante
 
