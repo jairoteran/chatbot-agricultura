@@ -63,6 +63,27 @@ function compactLabel(text, maxLength = 34) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+function deploymentLabel(mode) {
+  if (mode === "vercel") return "Vercel";
+  if (mode === "render") return "Render";
+  if (mode === "railway") return "Railway";
+  if (mode === "fly") return "Fly.io";
+  return "Local";
+}
+
+function responseModeSummary(status, backendReady) {
+  if (!backendReady) {
+    return "Preparando respuestas";
+  }
+
+  if (status.response_mode === "generative-rag") {
+    const provider = status.llm_provider ? status.llm_provider.toUpperCase() : "LLM";
+    return `${provider} activo`;
+  }
+
+  return "Modo basico";
+}
+
 function renderInlineFormatting(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
@@ -391,24 +412,20 @@ function App() {
   }
 
   const canReindex = backendStatus.allow_reindex;
-  const indexSourceLabel =
-    backendStatus.index_source === "storage"
-      ? "Indice cargado desde almacenamiento"
-      : backendStatus.index_source === "rebuild"
-        ? "Indice reconstruido desde PDFs"
-        : "Inicializando indice";
   const backendStatusLabel =
     backendStatus.status === "checking"
       ? "Inicializando backend"
       : backendReady
         ? "Backend listo"
         : "Backend no listo";
-  const responseModeLabel =
-    !backendReady
-      ? "Cargando modo de respuesta..."
-      : backendStatus.response_mode === "generative-rag"
-      ? `Modo conversacional con ${backendStatus.llm_provider || "LLM"}: ${backendStatus.llm_model || "modelo no indicado"}`
-      : "Modo basico sin modelo generativo";
+  const responseModeLabel = responseModeSummary(backendStatus, backendReady);
+  const deploymentLabelText = deploymentLabel(backendStatus.deployment_mode);
+  const readyDetail =
+    backendStatus.status === "error"
+      ? backendStatus.detail
+      : backendReady
+        ? `${backendStatus.indexed_file_count} documentos listos para consultar`
+        : backendStatus.detail;
 
   return (
     <motion.div
@@ -422,7 +439,7 @@ function App() {
           <p className="eyebrow">PDF Chat</p>
           <h1>Asistente documental</h1>
           <p className="sidebar-copy">
-            Haz preguntas sobre los PDFs cargados en <code>backend/data</code>.
+            Consulta tus documentos y recibe respuestas mas claras y directas.
           </p>
           <p className="document-counter">
             {documentCountLabel(backendStatus.indexed_file_count)}
@@ -440,36 +457,20 @@ function App() {
             <span className="dot" />
             {backendStatusLabel}
           </motion.div>
-          <p className="status-copy">{backendStatus.detail}</p>
-          <p className="status-meta">
-            {backendStatus.indexed_file_count} documento(s) indexado(s)
-          </p>
-          <p className="status-meta">
-            {indexSourceLabel}
-            {backendStatus.last_index_seconds > 0
-              ? ` en ${backendStatus.last_index_seconds.toFixed(2)} s`
-              : ""}
-          </p>
-          {backendStatus.embed_model && (
-            <p className="status-meta">Embeddings: {backendStatus.embed_model}</p>
-          )}
-          <p className="status-meta">{responseModeLabel}</p>
-          <p className="status-meta">
-            Despliegue: {
-              backendStatus.deployment_mode === "vercel"
-                ? "Vercel"
-                : backendStatus.deployment_mode === "render"
-                  ? "Render"
-                  : backendStatus.deployment_mode === "railway"
-                    ? "Railway"
-                    : backendStatus.deployment_mode === "fly"
-                      ? "Fly.io"
-                      : "Local"
-            }
-          </p>
+          <p className="status-copy">{readyDetail}</p>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Respuestas</span>
+              <strong>{responseModeLabel}</strong>
+            </div>
+            <div className="status-card">
+              <span className="status-card-label">Despliegue</span>
+              <strong>{deploymentLabelText}</strong>
+            </div>
+          </div>
           {!canReindex && (
             <p className="status-meta">
-              Reindexado en tiempo real deshabilitado en este despliegue.
+              El reindexado en vivo esta deshabilitado en este despliegue.
             </p>
           )}
           <div className="summary-tools">
