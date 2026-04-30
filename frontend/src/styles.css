@@ -1,10 +1,10 @@
 :root {
   font-family: "Manrope", sans-serif;
-  color: #2e241f;
+  color: #2c1834;
   background:
-    radial-gradient(circle at top left, rgba(255, 248, 237, 0.96), transparent 34%),
-    radial-gradient(circle at right, rgba(197, 125, 88, 0.18), transparent 30%),
-    linear-gradient(180deg, #f8f1e7 0%, #efe3d3 100%);
+    radial-gradient(circle at top left, rgba(255, 214, 170, 0.34), transparent 30%),
+    radial-gradient(circle at right, rgba(161, 108, 255, 0.18), transparent 34%),
+    linear-gradient(180deg, #fff2e6 0%, #f3e8ff 100%);
   line-height: 1.5;
   font-weight: 500;
   font-synthesis: none;
@@ -53,11 +53,11 @@ code {
   min-width: 0;
   overflow-x: clip;
   padding: 1.6rem;
-  color: #fff7f0;
+  color: #fff7ff;
   background:
-    radial-gradient(circle at top, rgba(255, 181, 138, 0.12), transparent 38%),
-    linear-gradient(180deg, rgba(74, 41, 32, 0.98), rgba(116, 61, 45, 0.96)),
-    linear-gradient(135deg, #6f3f31, #8c5a43);
+    radial-gradient(circle at top, rgba(255, 177, 109, 0.16), transparent 36%),
+    linear-gradient(180deg, rgba(68, 29, 96, 0.98), rgba(113, 43, 98, 0.96)),
+    linear-gradient(135deg, #4a236c, #a34f4f);
 }
 
 .eyebrow {
@@ -83,7 +83,7 @@ code {
 .sidebar-copy {
   max-width: 24ch;
   margin-top: 0.8rem;
-  color: rgba(255, 244, 235, 0.8);
+  color: rgba(255, 240, 250, 0.82);
   overflow-wrap: anywhere;
 }
 
@@ -92,8 +92,8 @@ code {
   margin: 0.85rem 0 0;
   padding: 0.62rem 0.9rem;
   border-radius: 999px;
-  color: #fff8f2;
-  background: rgba(255, 240, 229, 0.12);
+  color: #fff7ff;
+  background: rgba(255, 214, 170, 0.14);
   font-size: 0.92rem;
   font-weight: 700;
 }
@@ -114,8 +114,8 @@ code {
   width: 0.75rem;
   height: 0.75rem;
   border-radius: 999px;
-  background: #b6ef9b;
-  box-shadow: 0 0 0 6px rgba(182, 239, 155, 0.14);
+  background: #ffb067;
+  box-shadow: 0 0 0 6px rgba(255, 176, 103, 0.18);
 }
 
 .status-panel {
@@ -124,9 +124,9 @@ code {
   min-width: 0;
   overflow: hidden;
   padding: 0.95rem;
-  border: 1px solid rgba(255, 240, 229, 0.14);
+  border: 1px solid rgba(255, 225, 244, 0.16);
   border-radius: 22px;
-  background: rgba(255, 248, 241, 0.08);
+  background: rgba(255, 244, 252, 0.08);
   backdrop-filter: blur(10px);
   will-change: transform, opacity;
 }
@@ -149,14 +149,14 @@ code {
 }
 
 .status-ok {
-  color: #fffdf8;
-  background: rgba(120, 168, 84, 0.26);
+  color: #fffafc;
+  background: rgba(255, 176, 103, 0.2);
 }
 
 .status-error,
 .status-checking {
-  color: #fff8f2;
-  background: rgba(200, 112, 74, 0.28);
+  color: #fff7fb;
+  background: rgba(169, 104, 255, 0.22);
 }
 
 .status-copy,
@@ -166,12 +166,12 @@ code {
 }
 
 .status-copy {
-  color: rgba(255, 247, 240, 0.9);
+  color: rgba(255, 245, 252, 0.92);
   overflow-wrap: anywhere;
 }
 
 .status-meta {
-  color: rgba(255, 241, 232, 0.72);
+  color: rgba(245, 225, 248, 0.74);
   font-size: 0.88rem;
   overflow-wrap: anywhere;
 }
@@ -187,17 +187,17 @@ code {
   gap: 0.18rem;
   padding: 0.75rem 0.8rem;
   border-radius: 16px;
-  background: rgba(255, 244, 235, 0.09);
-  border: 1px solid rgba(255, 244, 235, 0.08);
+  background: rgba(255, 243, 250, 0.1);
+  border: 1px solid rgba(255, 226, 244, 0.1);
 }
 
 .status-card strong {
-  color: #fffaf5;
+  color: #fff7fd;
   font-size: 0.92rem;
 }
 
 .status-card-label {
-  color: rgba(255, 238, 226, 0.66);
+  color: rgba(248, 221, 244, 0.68);
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -211,7 +211,7 @@ code {
 }
 
 .summary-label {
-  color: rgba(255, 247, 240, 0.88);
+  color: rgba(255, 245, 252, 0.9);
   font-size: 0.86rem;
   font-weight: 700;
 }
@@ -222,10 +222,10 @@ code {
   min-width: 0;
   min-height: 44px;
   padding: 0.68rem 0.8rem;
-  border: 1px solid rgba(255, 239, 227, 0.14);
+  border: 1px solid rgba(255, 224, 240, 0.16);
   border-radius: 14px;
-  color: #fff9f4;
-  background: rgba(255, 250, 246, 0.1);
+  color: #fff7fd;
+  background: rgba(255, 244, 251, 0.11);
   text-overflow: ellipsis;
 }
 
@@ -234,10 +234,10 @@ code {
   max-width: 100%;
   min-height: 46px;
   padding: 0.75rem 1rem;
-  border: 1px solid rgba(255, 239, 227, 0.14);
+  border: 1px solid rgba(255, 224, 240, 0.16);
   border-radius: 16px;
-  color: #fffaf5;
-  background: rgba(255, 250, 246, 0.1);
+  color: #fff7fd;
+  background: rgba(255, 244, 251, 0.11);
   cursor: pointer;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -255,10 +255,10 @@ code {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(93, 63, 48, 0.08);
+  border: 1px solid rgba(108, 69, 142, 0.1);
   border-radius: 28px;
-  background: rgba(255, 252, 248, 0.78);
-  box-shadow: 0 18px 50px rgba(90, 61, 44, 0.08);
+  background: rgba(255, 250, 254, 0.8);
+  box-shadow: 0 18px 50px rgba(116, 71, 160, 0.08);
   backdrop-filter: blur(10px);
   overflow: hidden;
   will-change: transform, opacity;
@@ -269,15 +269,15 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   padding: 1.4rem 1.6rem;
-  border-bottom: 1px solid rgba(93, 63, 48, 0.08);
-  background: rgba(255, 250, 246, 0.8);
+  border-bottom: 1px solid rgba(108, 69, 142, 0.1);
+  background: rgba(255, 248, 253, 0.84);
 }
 
 .header-meta {
   padding: 0.55rem 0.8rem;
   border-radius: 999px;
-  color: #7a4e3c;
-  background: rgba(122, 78, 60, 0.08);
+  color: #7a3ea0;
+  background: rgba(122, 62, 160, 0.08);
   font-size: 0.9rem;
   font-weight: 700;
 }
@@ -308,21 +308,21 @@ code {
   border-radius: 14px;
   font-size: 0.9rem;
   font-weight: 700;
-  color: #fffaf5;
-  background: #8b5c46;
+  color: #fff9ff;
+  background: #6e3ea5;
 }
 
 .message-user .avatar {
-  background: #b56d4d;
+  background: #ee8f45;
 }
 
 .bubble {
   max-width: min(720px, 82%);
   padding: 1rem 1.1rem;
   border-radius: 20px;
-  background: #fffdfa;
-  border: 1px solid rgba(93, 63, 48, 0.06);
-  box-shadow: 0 8px 24px rgba(93, 63, 48, 0.06);
+  background: #fffdfd;
+  border: 1px solid rgba(120, 82, 150, 0.08);
+  box-shadow: 0 8px 24px rgba(120, 82, 150, 0.08);
   transform-origin: top left;
 }
 
@@ -337,8 +337,8 @@ code {
 }
 
 .message-user .bubble {
-  color: #fffaf5;
-  background: linear-gradient(135deg, #b56d4d, #8f5847);
+  color: #fffafc;
+  background: linear-gradient(135deg, #ee8f45, #8a46b6);
   transform-origin: top right;
 }
 
@@ -383,11 +383,11 @@ code {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: #b68774;
+  background: #b06ad5;
 }
 
 .loading-copy {
-  color: #7c5d50;
+  color: #7b5897;
   font-weight: 700;
 }
 
@@ -398,7 +398,7 @@ code {
 
 .sources-title {
   margin: 0;
-  color: #8a6352;
+  color: #8f54af;
   font-size: 0.85rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -407,21 +407,21 @@ code {
 
 .source-card {
   padding: 0.8rem 1rem;
-  border: 1px solid rgba(93, 63, 48, 0.08);
+  border: 1px solid rgba(129, 86, 165, 0.1);
   border-radius: 14px;
-  background: rgba(251, 245, 239, 0.96);
+  background: rgba(255, 247, 252, 0.96);
   will-change: transform, opacity;
 }
 
 .source-card p {
   margin: 0;
-  color: #5f4336;
+  color: #5c347d;
   font-weight: 600;
 }
 
 .source-meta {
   margin-top: 0.35rem !important;
-  color: #8a6a5c !important;
+  color: #9a6db0 !important;
   font-size: 0.88rem;
   font-weight: 500 !important;
 }
@@ -433,10 +433,10 @@ code {
   align-items: end;
   margin-top: 1rem;
   padding: 1rem;
-  border: 1px solid rgba(93, 63, 48, 0.08);
+  border: 1px solid rgba(126, 81, 164, 0.1);
   border-radius: 24px;
-  background: rgba(255, 251, 247, 0.9);
-  box-shadow: 0 16px 30px rgba(93, 63, 48, 0.06);
+  background: rgba(255, 249, 253, 0.92);
+  box-shadow: 0 16px 30px rgba(126, 81, 164, 0.08);
 }
 
 .composer textarea {
@@ -447,8 +447,8 @@ code {
   padding: 1rem 1.1rem;
   border: none;
   border-radius: 18px;
-  color: #2e241f;
-  background: #f2e6da;
+  color: #2c1834;
+  background: #f6ebfb;
   outline: none;
 }
 
@@ -457,14 +457,14 @@ code {
   height: 58px;
   border: none;
   border-radius: 18px;
-  color: #fffaf5;
-  background: linear-gradient(135deg, #8f5847, #c07450);
+  color: #fff9ff;
+  background: linear-gradient(135deg, #8a46b6, #f09549);
   cursor: pointer;
   transition:
     transform 0.2s ease,
     opacity 0.2s ease,
     box-shadow 0.2s ease;
-  box-shadow: 0 16px 30px rgba(143, 88, 71, 0.22);
+  box-shadow: 0 16px 30px rgba(138, 70, 182, 0.22);
 }
 
 .composer button:hover:not(:disabled) {
