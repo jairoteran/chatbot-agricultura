@@ -43,12 +43,15 @@ code {
   display: grid;
   grid-template-columns: 320px 1fr;
   min-height: 100vh;
+  min-width: 0;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  min-width: 0;
+  overflow-x: clip;
   padding: 2rem;
   color: #f8faf7;
   background:
@@ -118,6 +121,7 @@ code {
   display: grid;
   gap: 0.75rem;
   min-width: 0;
+  overflow: hidden;
   padding: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 22px;
@@ -135,10 +139,12 @@ code {
   align-items: center;
   gap: 0.75rem;
   width: fit-content;
+  max-width: 100%;
   padding: 0.7rem 0.95rem;
   border-radius: 999px;
   font-size: 0.92rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .status-ok {
@@ -191,6 +197,7 @@ code {
   border-radius: 14px;
   color: #f7fbf9;
   background: rgba(255, 255, 255, 0.08);
+  text-overflow: ellipsis;
 }
 
 .secondary-button {
@@ -448,7 +455,7 @@ code {
 
   .sidebar {
     gap: 1.5rem;
-    padding: 1.5rem;
+    padding: 1.25rem;
   }
 
   .status-panel {
@@ -456,8 +463,18 @@ code {
   }
 
   .sidebar h1 {
-    font-size: 2rem;
+    font-size: 1.95rem;
     max-width: none;
+  }
+
+  .status-pill {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .summary-select,
+  .secondary-button {
+    font-size: 0.95rem;
   }
 
   .chat-layout {

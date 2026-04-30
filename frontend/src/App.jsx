@@ -56,6 +56,13 @@ function documentCountLabel(count) {
   return `${count} documento${count === 1 ? "" : "s"} cargado${count === 1 ? "" : "s"}`;
 }
 
+function compactLabel(text, maxLength = 34) {
+  if (!text) {
+    return "";
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
 function renderInlineFormatting(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((part, index) => {
@@ -496,8 +503,8 @@ function App() {
                 disabled={!backendReady || isSummarizing}
               >
                 {backendStatus.indexed_files.map((fileName) => (
-                  <option key={fileName} value={fileName}>
-                    {fileName}
+                  <option key={fileName} value={fileName} title={fileName}>
+                    {compactLabel(fileName)}
                   </option>
                 ))}
               </select>
