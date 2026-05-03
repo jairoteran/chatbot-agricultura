@@ -44,6 +44,8 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     detail: str
+    init_stage: str = "starting"
+    init_progress: int = 0
     indexed_files: list[str] = Field(default_factory=list)
     indexed_documents: list[IndexedDocument] = Field(default_factory=list)
     indexed_file_count: int = 0

@@ -44,6 +44,16 @@ rag_service: RAGService | None = None
 startup_error: str | None = None
 init_lock = threading.Lock()
 init_thread: threading.Thread | None = None
+init_progress = 0
+init_stage = "starting"
+init_detail = "Inicializando servicio..."
+
+
+def update_init_state(progress: int, stage: str, detail: str) -> None:
+    global init_progress, init_stage, init_detail
+    init_progress = max(0, min(progress, 100))
+    init_stage = stage
+    init_detail = detail
 
 
 def initialize_service(force_rebuild: bool = False) -> None:
@@ -51,13 +61,17 @@ def initialize_service(force_rebuild: bool = False) -> None:
 
     try:
         if rag_service is None:
-            rag_service = RAGService()
+            update_init_state(2, "starting", "Inicializando servicio...")
+            rag_service = RAGService(progress_callback=update_init_state)
         elif force_rebuild:
+            update_init_state(12, "reindexing", "Reconstruyendo el indice documental...")
             rag_service.reindex()
+            update_init_state(100, "ready", "Servicio listo")
         startup_error = None
     except Exception as exc:
         rag_service = None
         startup_error = str(exc)
+        update_init_state(0, "error", startup_error)
 
 
 def ensure_service_initializing(force_rebuild: bool = False) -> None:
@@ -89,7 +103,9 @@ def healthcheck() -> HealthResponse:
         ensure_service_initializing(force_rebuild=False)
         return HealthResponse(
             status="checking" if startup_error is None else "error",
-            detail=startup_error or "Inicializando servicio y cargando el indice documental...",
+            detail=startup_error or init_detail,
+            init_stage=init_stage,
+            init_progress=init_progress,
             indexed_files=[],
             indexed_file_count=0,
             index_ready=False,

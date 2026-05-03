@@ -192,7 +192,8 @@ def _detect_deployment_mode() -> str:
 
 
 class RAGService:
-    def __init__(self) -> None:
+    def __init__(self, progress_callback=None) -> None:
+        self.progress_callback = progress_callback
         self.index: Any | None = None
         self.retriever = None
         self.indexed_files: list[str] = []
@@ -219,9 +220,17 @@ class RAGService:
         self.last_input_tokens = 0
         self.last_output_tokens = 0
         self.last_total_tokens = 0
+        self._report_progress(5, "starting", "Preparando configuracion del servicio...")
         self._configure_llm_client()
+        self._report_progress(18, "embedding-setup", "Configurando el backend de embeddings...")
         self._configure_embeddings()
+        self._report_progress(32, "index-check", "Verificando el indice documental...")
         self.ensure_index_ready()
+        self._report_progress(100, "ready", "Servicio listo")
+
+    def _report_progress(self, progress: int, stage: str, detail: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(progress, stage, detail)
 
     def _configure_llm_client(self) -> None:
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -274,6 +283,11 @@ class RAGService:
 
     def ensure_index_ready(self, force_rebuild: bool = False) -> None:
         started_at = time.perf_counter()
+        self._report_progress(
+            38 if not force_rebuild else 22,
+            "index-loading",
+            "Cargando el indice documental...",
+        )
         self.index = self._load_or_build_index(force_rebuild=force_rebuild)
         self.retriever = (
             self.index.as_retriever(similarity_top_k=TOP_K)
@@ -285,6 +299,7 @@ class RAGService:
     def _load_or_build_index(self, force_rebuild: bool = False) -> Any | None:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self._report_progress(42, "manifest-scan", "Analizando documentos y archivos del indice...")
         current_manifest = self._build_manifest()
         self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
 
@@ -293,6 +308,7 @@ class RAGService:
             and self._can_boot_from_chunk_cache_only()
             and self._read_manifest() == current_manifest
         ):
+            self._report_progress(72, "chunk-cache", "Cargando indice desde chunk cache...")
             self.chunk_cache = self._read_chunk_cache()
             self.index_stale = False
             self.index_detail = "Servicio listo"
@@ -301,6 +317,7 @@ class RAGService:
 
         if not current_manifest["files"]:
             if self._has_chunk_cache():
+                self._report_progress(72, "chunk-cache", "Cargando indice previamente almacenado...")
                 self.chunk_cache = self._read_chunk_cache()
                 self.last_index_source = "chunk-cache"
                 if not self.indexed_files:
@@ -317,6 +334,7 @@ class RAGService:
         if not force_rebuild and self._has_usable_persisted_index(current_manifest):
             from llama_index.core import StorageContext, load_index_from_storage
 
+            self._report_progress(78, "storage-index", "Cargando indice persistido...")
             storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
             self.chunk_cache = self._read_chunk_cache()
             self.index_stale = False
@@ -345,14 +363,18 @@ class RAGService:
                 "No fue posible cargar el backend de embeddings necesario para reconstruir el indice."
             )
 
+        self._report_progress(55, "document-load", "Leyendo documentos PDF para reconstruir el indice...")
         documents = self._load_documents()
         from llama_index.core import VectorStoreIndex
         from llama_index.core.node_parser import SentenceSplitter
 
+        self._report_progress(68, "node-build", "Dividiendo documentos en fragmentos analizables...")
         splitter = SentenceSplitter(chunk_size=700, chunk_overlap=120)
         nodes = splitter.get_nodes_from_documents(documents)
+        self._report_progress(82, "vector-index", "Construyendo el indice vectorial...")
         self.chunk_cache = self._serialize_nodes(nodes)
         index = VectorStoreIndex(nodes)
+        self._report_progress(92, "persist-index", "Guardando el indice para futuros arranques...")
         index.storage_context.persist(persist_dir=str(STORAGE_DIR))
         self.index_stale = False
         self.index_detail = "Servicio listo"
@@ -466,6 +488,8 @@ class RAGService:
         return {
             "status": "ok",
             "detail": self.index_detail,
+            "init_stage": "ready",
+            "init_progress": 100,
             "indexed_files": self.indexed_files,
             "indexed_documents": self._indexed_documents_payload(),
             "indexed_file_count": len(self.indexed_files),

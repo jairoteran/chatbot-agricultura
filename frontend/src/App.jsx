@@ -52,6 +52,30 @@ const responseStyleOptions = [
   { value: "tecnico", label: "Tecnico" },
 ];
 
+const initialBackendStatus = {
+  status: "checking",
+  detail: "Verificando backend...",
+  init_stage: "starting",
+  init_progress: 0,
+  indexed_files: [],
+  indexed_documents: [],
+  indexed_file_count: 0,
+  index_ready: false,
+  index_source: "startup",
+  last_index_seconds: 0,
+  embed_model: "",
+  response_mode: "extractive",
+  llm_provider: "",
+  llm_model: "",
+  deployment_mode: "local",
+  allow_reindex: true,
+  last_interaction_label: "Sin consultas",
+  last_response_ms: 0,
+  last_input_tokens: 0,
+  last_output_tokens: 0,
+  last_total_tokens: 0,
+};
+
 function documentCountLabel(count) {
   return `${count} documento${count === 1 ? "" : "s"} cargado${count === 1 ? "" : "s"}`;
 }
@@ -69,6 +93,33 @@ function deploymentLabel(mode) {
   if (mode === "railway") return "Railway";
   if (mode === "fly") return "Fly.io";
   return "Local";
+}
+
+function backendProgressLabel(progress, backendReady, status) {
+  if (backendReady) {
+    return "Backend listo";
+  }
+  if (status === "error") {
+    return "No disponible";
+  }
+  return `${progress}%`;
+}
+
+function backendStageLabel(stage, detail, backendReady, status) {
+  if (backendReady) {
+    return "Servicio listo para consultas.";
+  }
+  if (status === "error") {
+    return detail || "No fue posible inicializar el backend.";
+  }
+  return detail || stage || "Inicializando backend...";
+}
+
+function indexSourceLabel(source) {
+  if (source === "storage") return "Indice persistido";
+  if (source === "chunk-cache") return "Chunk cache";
+  if (source === "rebuild") return "Reconstruccion";
+  return "Inicio";
 }
 
 function responseModeLabel(status, backendReady) {
@@ -159,27 +210,8 @@ function App() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState("");
   const [responseStyle, setResponseStyle] = useState("academico");
-  const [backendStatus, setBackendStatus] = useState({
-    status: "checking",
-    detail: "Verificando backend...",
-    indexed_files: [],
-    indexed_documents: [],
-    indexed_file_count: 0,
-    index_ready: false,
-    index_source: "startup",
-    last_index_seconds: 0,
-    embed_model: "",
-    response_mode: "extractive",
-    llm_provider: "",
-    llm_model: "",
-    deployment_mode: "local",
-    allow_reindex: true,
-    last_interaction_label: "Sin consultas",
-    last_response_ms: 0,
-    last_input_tokens: 0,
-    last_output_tokens: 0,
-    last_total_tokens: 0,
-  });
+  const [backendLoadProgress, setBackendLoadProgress] = useState(7);
+  const [backendStatus, setBackendStatus] = useState(initialBackendStatus);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
@@ -200,10 +232,42 @@ function App() {
   }, [input]);
 
   useEffect(() => {
+    if (Number.isFinite(backendStatus.init_progress) && backendStatus.init_progress > 0) {
+      setBackendLoadProgress(backendStatus.init_progress);
+      return undefined;
+    }
+
+    if (backendReady) {
+      setBackendLoadProgress(100);
+      return undefined;
+    }
+
+    if (backendStatus.status === "error") {
+      setBackendLoadProgress(0);
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setBackendLoadProgress((currentProgress) => {
+        if (currentProgress >= 95) {
+          return currentProgress;
+        }
+
+        const step = Math.max(1, Math.ceil((96 - currentProgress) / 12));
+        return Math.min(currentProgress + step, 95);
+      });
+    }, 350);
+
+    return () => window.clearInterval(intervalId);
+  }, [backendReady, backendStatus.status, backendStatus.init_progress]);
+
+  useEffect(() => {
     let active = true;
     let timerId;
 
     async function loadHealth() {
+      let nextDelay = 5000;
+
       try {
         const response = await fetch(HEALTH_URL);
         const data = await response.json().catch(() => ({}));
@@ -214,45 +278,38 @@ function App() {
           return;
         }
 
-        setBackendStatus(data);
+        const normalizedStatus = { ...initialBackendStatus, ...data };
+        nextDelay =
+          normalizedStatus.status === "ok" && normalizedStatus.index_ready ? 15000 : 5000;
+        setBackendStatus(normalizedStatus);
         setSelectedDocument((currentValue) => {
-          if (currentValue && data.indexed_files?.includes(currentValue)) {
+          if (currentValue && normalizedStatus.indexed_files?.includes(currentValue)) {
             return currentValue;
           }
-          return data.indexed_documents?.[0]?.file_name || data.indexed_files?.[0] || "";
+          return (
+            normalizedStatus.indexed_documents?.[0]?.file_name ||
+            normalizedStatus.indexed_files?.[0] ||
+            ""
+          );
         });
       } catch {
         if (!active) {
           return;
         }
 
+        nextDelay = 5000;
         setBackendStatus({
+          ...initialBackendStatus,
           status: "error",
           detail: "No pude consultar el estado del backend.",
-          indexed_files: [],
-          indexed_documents: [],
-          indexed_file_count: 0,
-          index_ready: false,
-          index_source: "startup",
-          last_index_seconds: 0,
-          embed_model: "",
-          response_mode: "extractive",
-          llm_provider: "",
-          llm_model: "",
-          deployment_mode: "local",
-          allow_reindex: true,
-          last_interaction_label: "Sin consultas",
-          last_response_ms: 0,
-          last_input_tokens: 0,
-          last_output_tokens: 0,
-          last_total_tokens: 0,
+          init_stage: "error",
+          init_progress: 0,
         });
       } finally {
         if (!active) {
           return;
         }
 
-        const nextDelay = backendReady ? 15000 : 5000;
         timerId = window.setTimeout(loadHealth, nextDelay);
       }
     }
@@ -265,7 +322,7 @@ function App() {
         window.clearTimeout(timerId);
       }
     };
-  }, [backendReady]);
+  }, []);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -342,6 +399,13 @@ function App() {
 
   async function handleReindex() {
     setIsReindexing(true);
+    setBackendStatus((currentStatus) => ({
+      ...currentStatus,
+      status: "checking",
+      detail: "Reconstruyendo el indice documental...",
+      init_stage: "reindexing",
+      init_progress: 18,
+    }));
 
     try {
       const response = await fetch(REINDEX_URL, {
@@ -357,10 +421,14 @@ function App() {
         ...currentStatus,
         status: "ok",
         detail: payload.detail,
+        init_stage: "ready",
+        init_progress: 100,
         indexed_files: payload.indexed_files || [],
         indexed_documents: payload.indexed_documents || [],
         indexed_file_count: (payload.indexed_files || []).length,
         index_ready: true,
+        index_source: payload.index_source || "rebuild",
+        last_index_seconds: payload.last_index_seconds || 0,
       }));
       setSelectedDocument(
         payload.indexed_documents?.[0]?.file_name || payload.indexed_files?.[0] || "",
@@ -461,6 +529,25 @@ function App() {
       : backendReady
         ? "Backend listo"
         : "Backend no listo";
+  const backendProgressLabelText = backendProgressLabel(
+    backendLoadProgress,
+    backendReady,
+    backendStatus.status,
+  );
+  const backendStageText = backendStageLabel(
+    backendStatus.init_stage,
+    backendStatus.detail,
+    backendReady,
+    backendStatus.status,
+  );
+  const backendProgressValue =
+    Number.isFinite(backendStatus.init_progress) && backendStatus.init_progress > 0
+      ? backendStatus.init_progress
+      : backendLoadProgress;
+  const showBackendDetailMeta =
+    backendStatus.detail &&
+    backendStatus.detail !== backendStageText &&
+    backendStatus.detail !== "Servicio listo";
 
   return (
     <motion.div
@@ -490,6 +577,28 @@ function App() {
             <span className="dot" />
             {statusLabel}
           </motion.div>
+          <div className="backend-progress" aria-live="polite">
+            <div className="backend-progress-header">
+              <span className="status-card-label">Carga backend</span>
+              <strong>{backendProgressLabelText}</strong>
+            </div>
+            <div
+              className="backend-progress-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={backendProgressValue}
+              aria-label="Progreso de carga del backend"
+            >
+              <motion.div
+                className="backend-progress-fill"
+                initial={false}
+                animate={{ width: `${backendProgressValue}%` }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+              />
+            </div>
+            <p className="backend-progress-stage">{backendStageText}</p>
+          </div>
           <div className="status-highlights">
             <div className="status-card">
               <span className="status-card-label">Respuestas</span>
@@ -518,8 +627,24 @@ function App() {
               </strong>
             </div>
           </div>
+          <div className="status-highlights">
+            <div className="status-card">
+              <span className="status-card-label">Indice</span>
+              <strong>{indexSourceLabel(backendStatus.index_source)}</strong>
+            </div>
+            <div className="status-card">
+              <span className="status-card-label">Arranque</span>
+              <strong>
+                {backendStatus.last_index_seconds > 0
+                  ? `${backendStatus.last_index_seconds} s`
+                  : "--"}
+              </strong>
+            </div>
+          </div>
           <p className="status-meta">{backendStatus.last_interaction_label}</p>
-          <p className="status-meta">{backendStatus.detail}</p>
+          {showBackendDetailMeta && (
+            <p className="status-meta">{backendStatus.detail}</p>
+          )}
           {!backendStatus.allow_reindex && (
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.
