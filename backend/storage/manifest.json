@@ -2,6 +2,48 @@
   "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
   "files": [
     {
+      "file_name": "1999_Gondard Gasselin_Panorama hist\u00f3rico Ecuador.pdf",
+      "relative_path": "1999_Gondard Gasselin_Panorama hist\u00f3rico Ecuador.pdf",
+      "size": 493450,
+      "mtime_ns": 1777825706556771100,
+      "fingerprint": "231b6ee131b69329f25efa2e3b1141ed7367d804b731dec4f68da50f797286a7"
+    },
+    {
+      "file_name": "1_De-la-agricultura-tradicional-a__.pdf",
+      "relative_path": "1_De-la-agricultura-tradicional-a__.pdf",
+      "size": 563402,
+      "mtime_ns": 1777825188380777500,
+      "fingerprint": "b4a1b8bb17eb27ba87885cd4c1c3a4a25dc8d8c971f4324067e50ade850e2d90"
+    },
+    {
+      "file_name": "268_manual-para-hacer-agricultura-ecologica.pdf",
+      "relative_path": "268_manual-para-hacer-agricultura-ecologica.pdf",
+      "size": 2012267,
+      "mtime_ns": 1777825116021292100,
+      "fingerprint": "b1548df46a40bea1e0eac3ca8359ac538e970dcb4bab7d03d8971d23aa3b7196"
+    },
+    {
+      "file_name": "569_all.pdf",
+      "relative_path": "569_all.pdf",
+      "size": 20354317,
+      "mtime_ns": 1777824943199756200,
+      "fingerprint": "07778faf48e0ac0d63bf0ca6d126be355f56679709c0b7fbffe8a156194e6cb0"
+    },
+    {
+      "file_name": "602_Manual_de_Agroecolog\u00eda_y_Agroforester\u00eda._Pr\u00e1cticas_para_una_Agricultura_Ecol\u00f3gica.pdf",
+      "relative_path": "602_Manual_de_Agroecolog\u00eda_y_Agroforester\u00eda._Pr\u00e1cticas_para_una_Agricultura_Ecol\u00f3gica.pdf",
+      "size": 7025507,
+      "mtime_ns": 1777825159785550000,
+      "fingerprint": "c8b4304fc6c0b73cafcf954f43754696869fe6c6f7a3f08189b58488a26f930e"
+    },
+    {
+      "file_name": "AGRICULTURASOSTENIBLEENECUADOR.pdf",
+      "relative_path": "AGRICULTURASOSTENIBLEENECUADOR.pdf",
+      "size": 3516551,
+      "mtime_ns": 1777825468458202700,
+      "fingerprint": "d23bb295d421ff2c632a6ae321c83846775e680bad1a5f8953cc3f4265c2fd2f"
+    },
+    {
       "file_name": "Agenda_Tungurahua_2019-2023.pdf",
       "relative_path": "Agenda_Tungurahua_2019-2023.pdf",
       "size": 8512855,
@@ -16,11 +58,53 @@
       "fingerprint": "b79dbd37a9996a46795395ac4e56a8ef1e230a016f0a3eab61c8683b4a9484fe"
     },
     {
+      "file_name": "AgriculturaFamiliarEcuador.pdf",
+      "relative_path": "AgriculturaFamiliarEcuador.pdf",
+      "size": 1097372,
+      "mtime_ns": 1777825761876647900,
+      "fingerprint": "b269426504711eeab82820110f8fed3f3b7246cd8ca26f8fd68eec5840e29e2a"
+    },
+    {
+      "file_name": "Agriculturatradicional.pdf",
+      "relative_path": "Agriculturatradicional.pdf",
+      "size": 719027,
+      "mtime_ns": 1777825142090941600,
+      "fingerprint": "bb7865a824bda1df41854b1c42d7a13b11c6f673c080c77088e8904ad530726c"
+    },
+    {
+      "file_name": "Agroecologia.pdf",
+      "relative_path": "Agroecologia.pdf",
+      "size": 526846,
+      "mtime_ns": 1777825566840072700,
+      "fingerprint": "26959579669ac945242f7163e157a3945e47079536789ffada7f3cd9819d539a"
+    },
+    {
+      "file_name": "Art\u00edculo+15+pag+237-254.pdf",
+      "relative_path": "Art\u00edculo+15+pag+237-254.pdf",
+      "size": 744070,
+      "mtime_ns": 1777825722898245400,
+      "fingerprint": "7f8030e9b001586e6da21fbeb33ea59a7be1800ca33989ab90cb79e4d023af88"
+    },
+    {
       "file_name": "CHAKRA ANDINA UN SISTEMA AGR\u00cdCOLA ANCESTRAL cotacachi.pdf",
       "relative_path": "CHAKRA ANDINA UN SISTEMA AGR\u00cdCOLA ANCESTRAL cotacachi.pdf",
       "size": 18578274,
       "mtime_ns": 1777001771000000000,
       "fingerprint": "ab3181f45ec8b6a44141051e1a3c83ed12f71daa3c1c72fe749c129ad33dd2d7"
+    },
+    {
+      "file_name": "Cultivo-de-granos-andinos-en-Ecuador-2002.pdf",
+      "relative_path": "Cultivo-de-granos-andinos-en-Ecuador-2002.pdf",
+      "size": 430664,
+      "mtime_ns": 1777825571951279200,
+      "fingerprint": "a9bfea8fc4cf0963176d1bc4935e0e6b2a593cfe5898fd9d606abe79cdbb303a"
+    },
+    {
+      "file_name": "Dialnet-AgriculturaTradicionalCampesina-4835774.pdf",
+      "relative_path": "Dialnet-AgriculturaTradicionalCampesina-4835774.pdf",
+      "size": 956717,
+      "mtime_ns": 1777825344529984800,
+      "fingerprint": "207656f8bb0ee8a0ceb052d5c991dc45cb1b54e329614582f981c1e10abf4591"
     },
     {
       "file_name": "Dialnet-AgroecologiaEnElEcuadorProcesoHistoricoLogrosYDesa-7567032.pdf",
@@ -44,6 +128,13 @@
       "fingerprint": "69257a1457b5cce2d8a6206ae2b943c4b23a8ab40e2198393d7e43d32b8b49d3"
     },
     {
+      "file_name": "Doris-Guilcamaigua.pdf",
+      "relative_path": "Doris-Guilcamaigua.pdf",
+      "size": 1256273,
+      "mtime_ns": 1777825430173448100,
+      "fingerprint": "26f6751e00f7751aed424260f352a0abb03b26b5c5531aa79bbf27f299ce8b8c"
+    },
+    {
       "file_name": "E1-1-Modulo-Saberes-Ancestrales-2-ministerio-ecuador.pdf",
       "relative_path": "E1-1-Modulo-Saberes-Ancestrales-2-ministerio-ecuador.pdf",
       "size": 3762257,
@@ -56,6 +147,13 @@
       "size": 1967388,
       "mtime_ns": 1777003831000000000,
       "fingerprint": "c3698405ce9115a72bc76fa53d12b3bbb3ebc42acd41bc471156e4e6f627125e"
+    },
+    {
+      "file_name": "Libro-Agricultura-V4.pdf",
+      "relative_path": "Libro-Agricultura-V4.pdf",
+      "size": 2789882,
+      "mtime_ns": 1777825420928973100,
+      "fingerprint": "4c18e2be740012a19389b485dcf6be00a59baadf29977c523e0ac1509a535f09"
     },
     {
       "file_name": "PAPA.pdf",
@@ -93,6 +191,34 @@
       "fingerprint": "6cd674cce5d92e116cc22d3e1d1927996421973cc513ac77ad01e22c229780a6"
     },
     {
+      "file_name": "agricultura-de-conservacion.-una-practica-innovadora-con-beneficios-economicos-y-medioambientales-jose-ramiro-benites-jump,-alexandra-bot.pdf",
+      "relative_path": "agricultura-de-conservacion.-una-practica-innovadora-con-beneficios-economicos-y-medioambientales-jose-ramiro-benites-jump,-alexandra-bot.pdf",
+      "size": 11179497,
+      "mtime_ns": 1777825054536899300,
+      "fingerprint": "54f8b1b2ce4f819c5ae850319c312f2a1433283f8b92992d0d1a5128cef6e1bf"
+    },
+    {
+      "file_name": "brblaa1384751.pdf",
+      "relative_path": "brblaa1384751.pdf",
+      "size": 23304814,
+      "mtime_ns": 1777824933806122200,
+      "fingerprint": "159a713265ef1a32b636916453eb364f4da44be5d89852c8dbbb8fb802d975b3"
+    },
+    {
+      "file_name": "ch7_agriculture-handbook.pdf",
+      "relative_path": "ch7_agriculture-handbook.pdf",
+      "size": 1115786,
+      "mtime_ns": 1777824909579662300,
+      "fingerprint": "4dcaef389fcd723fd6c0c41b0c78ff1d3e0a22dd2ef886dc98c980bd7b64f621"
+    },
+    {
+      "file_name": "ecu167500.pdf",
+      "relative_path": "ecu167500.pdf",
+      "size": 3393513,
+      "mtime_ns": 1777824913052165700,
+      "fingerprint": "c80ef6642bec46666856fe883b89668716cb3f9c5cafe9cf915864eebeaee06c"
+    },
+    {
       "file_name": "editum,+Cap+08+AGROECOLOGI\u00c2\u00a6\u00c3\u00bcA+EN+EL+ECUADOR.+PROCESO+HISTO\u00c2\u00a6\u00c3\u00bcRICO,+LOGROS+Y+DESAFI\u00c2\u00a6\u00c3\u00bcOS.pdf",
       "relative_path": "editum,+Cap+08+AGROECOLOGI\u00c2\u00a6\u00c3\u00bcA+EN+EL+ECUADOR.+PROCESO+HISTO\u00c2\u00a6\u00c3\u00bcRICO,+LOGROS+Y+DESAFI\u00c2\u00a6\u00c3\u00bcOS.pdf",
       "size": 418738,
@@ -100,11 +226,32 @@
       "fingerprint": "c7c8c835b20c323d2fbe4ef9ef8f1510b50e7b0b5d9a849def987c5f81f64fd0"
     },
     {
+      "file_name": "hd_1993_07.pdf",
+      "relative_path": "hd_1993_07.pdf",
+      "size": 1521168,
+      "mtime_ns": 1777825328297764300,
+      "fingerprint": "839a9dcdd3774b96cbbd22b13afad26153d830a22a4f1f3b845826a3b6876fae"
+    },
+    {
+      "file_name": "la-agricultura-organica-y-la-agricultura-tradicional-una-43tosel8j0.pdf",
+      "relative_path": "la-agricultura-organica-y-la-agricultura-tradicional-una-43tosel8j0.pdf",
+      "size": 151708,
+      "mtime_ns": 1777825497970241000,
+      "fingerprint": "42233e52e8757a7cfcfcea9698431e09f18bb8e8c6a9f6150065d69714d725c1"
+    },
+    {
       "file_name": "pr\u00e1cticas y saberes ancestrales de los agricultores de San Joaqu\u00edn Cuenca.pdf",
       "relative_path": "pr\u00e1cticas y saberes ancestrales de los agricultores de San Joaqu\u00edn Cuenca.pdf",
       "size": 2694769,
       "mtime_ns": 1777001878000000000,
       "fingerprint": "b96b16be5497233dc66fb4122e3b42e4ef87b63661bb13b8e59ca13501cef55a"
+    },
+    {
+      "file_name": "una-breve-historia-de-los-origenes-de-la-agricultura-la-domesticacion-y-la-diversidad-de-los-cultivos.pdf",
+      "relative_path": "una-breve-historia-de-los-origenes-de-la-agricultura-la-domesticacion-y-la-diversidad-de-los-cultivos.pdf",
+      "size": 860643,
+      "mtime_ns": 1777825663336000500,
+      "fingerprint": "b66f490ff59316eaa744e84e2405e8a5ec4b1901d338ea912b97c2d843a22219"
     }
   ]
 }
