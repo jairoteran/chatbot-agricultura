@@ -139,6 +139,11 @@ SMALL_TALK_PATTERNS = [
         "Soy un asistente documental. Puedo revisar la informacion de tus PDFs, resumirla, explicarla de forma clara y ayudarte a encontrar ideas importantes sin copiar el texto tal cual.",
     ),
 ]
+DOCUMENT_COUNT_PATTERNS = [
+    re.compile(r"^\s*cu[aá]ntos?\s+documentos?\s+(tienes|hay|tengo|dispones|tienen)\s*[?!. ]*$", re.IGNORECASE),
+    re.compile(r"^\s*cu[aá]l\s+es\s+el\s+total\s+de\s+documentos?\s*[?!. ]*$", re.IGNORECASE),
+    re.compile(r"^\s*cu[aá]ntos?\s+pdfs?\s+(tienes|hay|dispones|tienen)\s*[?!. ]*$", re.IGNORECASE),
+]
 RESPONSE_STYLE_GUIDANCE = {
     "academico": {
         "label": "Academico",
@@ -214,6 +219,8 @@ class RAGService:
         self.openai_client = None
         self.vector_backend_ready = False
         self.embed_model_name = ""
+        self._manifest_cache: dict | None = None
+        self._manifest_cache_signature: tuple[tuple[str, int, int], ...] | None = None
         self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         self.last_interaction_label = "Sin consultas"
         self.last_response_ms = 0
@@ -431,42 +438,88 @@ class RAGService:
             return False
 
         stored_manifest = self._read_manifest()
-
-        return stored_manifest == current_manifest
+        return self._manifests_equivalent(stored_manifest, current_manifest)
 
     def _build_manifest(self) -> dict:
-        files_by_path: dict[str, dict] = {}
+        file_entries: list[tuple[Path, os.stat_result, str]] = []
 
         for path in DATA_DIR.rglob("*.pdf"):
             if not path.is_file():
                 continue
-
             stat = path.stat()
-            file_hash = sha256(
-                f"{path.resolve()}::{stat.st_mtime_ns}::{stat.st_size}".encode("utf-8")
-            ).hexdigest()
             relative_path = str(path.relative_to(DATA_DIR)).replace("\\", "/")
+            file_entries.append((path, stat, relative_path))
+
+        file_entries.sort(key=lambda item: item[2])
+        cache_signature = tuple(
+            (relative_path, stat.st_size, stat.st_mtime_ns)
+            for _, stat, relative_path in file_entries
+        )
+        if (
+            self._manifest_cache is not None
+            and self._manifest_cache_signature == cache_signature
+        ):
+            return self._manifest_cache
+
+        files_by_path: dict[str, dict] = {}
+
+        for path, stat, relative_path in file_entries:
+            file_hash = self._hash_file_contents(path)
             files_by_path[relative_path] = {
                 "file_name": path.name,
                 "relative_path": relative_path,
                 "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
                 "fingerprint": file_hash,
             }
 
         files = sorted(files_by_path.values(), key=lambda item: item["relative_path"])
-        return {
+        manifest = {
+            "manifest_version": 2,
             "embed_model": EMBED_MODEL,
             "files": files,
         }
+        self._manifest_cache_signature = cache_signature
+        self._manifest_cache = manifest
+        return manifest
+
+    def _hash_file_contents(self, path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as file_handle:
+            for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def _manifest_file_names(self, manifest: dict) -> list[str]:
         return [item["file_name"] for item in manifest.get("files", [])]
 
+    def _manifests_equivalent(self, stored_manifest: dict, current_manifest: dict) -> bool:
+        if stored_manifest.get("embed_model") != current_manifest.get("embed_model"):
+            return False
+
+        stored_files = sorted(stored_manifest.get("files", []), key=lambda item: item.get("relative_path", ""))
+        current_files = sorted(current_manifest.get("files", []), key=lambda item: item.get("relative_path", ""))
+        if len(stored_files) != len(current_files):
+            return False
+
+        strict_compare = (
+            stored_manifest.get("manifest_version") == 2
+            and current_manifest.get("manifest_version") == 2
+        )
+
+        for stored_item, current_item in zip(stored_files, current_files):
+            if stored_item.get("relative_path") != current_item.get("relative_path"):
+                return False
+            if int(stored_item.get("size", -1)) != int(current_item.get("size", -1)):
+                return False
+            if strict_compare and stored_item.get("fingerprint") != current_item.get("fingerprint"):
+                return False
+
+        return True
+
     def _refresh_index_if_needed(self) -> None:
         current_manifest = self._build_manifest()
         stored_manifest = self._read_manifest()
-        has_changes = stored_manifest != current_manifest
+        has_changes = not self._manifests_equivalent(stored_manifest, current_manifest)
 
         current_files = self._manifest_file_names(current_manifest)
         stored_files = self._manifest_file_names(stored_manifest)
@@ -551,6 +604,16 @@ class RAGService:
         if small_talk_answer:
             result = {
                 "answer": small_talk_answer,
+                "found": True,
+                "sources": [],
+            }
+            self._record_interaction_metrics("Ultima respuesta", started_at)
+            return {**result, **self._current_response_metrics()}
+
+        document_count_answer = self._document_count_answer(question)
+        if document_count_answer:
+            result = {
+                "answer": document_count_answer,
                 "found": True,
                 "sources": [],
             }
@@ -690,6 +753,17 @@ class RAGService:
             if pattern.match(normalized_question):
                 return answer
         return ""
+
+    def _document_count_answer(self, question: str) -> str:
+        normalized_question = " ".join(question.strip().split())
+        if not any(pattern.match(normalized_question) for pattern in DOCUMENT_COUNT_PATTERNS):
+            return ""
+
+        total_documents = len(self.indexed_files)
+        document_label = "documento" if total_documents == 1 else "documentos"
+        return (
+            f"Actualmente tengo {total_documents} {document_label} indexados y listos para consulta."
+        )
 
     def _vector_candidates(self, question: str, keywords: set[str]) -> list[dict]:
         if self.retriever is None:
