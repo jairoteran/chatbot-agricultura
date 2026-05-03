@@ -460,12 +460,17 @@ class RAGService:
             "files": files,
         }
 
+    def _manifest_file_names(self, manifest: dict) -> list[str]:
+        return [item["file_name"] for item in manifest.get("files", [])]
+
     def _refresh_index_if_needed(self) -> None:
         current_manifest = self._build_manifest()
         stored_manifest = self._read_manifest()
         has_changes = stored_manifest != current_manifest
 
-        self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
+        current_files = self._manifest_file_names(current_manifest)
+        stored_files = self._manifest_file_names(stored_manifest)
+        self.indexed_files = current_files
 
         if not has_changes:
             self.index_stale = False
@@ -478,8 +483,10 @@ class RAGService:
             return
 
         self.index_stale = True
+        self.indexed_files = stored_files
         self.index_detail = (
-            "Se detectaron PDFs nuevos o actualizados, pero el indice actual no los incluye. "
+            f"Se detectaron {len(current_files)} PDFs en backend/data, pero solo {len(stored_files)} "
+            "estan realmente indexados en backend/storage. "
             "Reconstruye backend/storage o habilita el reindexado en vivo."
         )
 
