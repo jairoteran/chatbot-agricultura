@@ -208,7 +208,7 @@ class RAGService:
         self.deployment_mode = _detect_deployment_mode()
         raw_allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower()
         self.allow_reindex = raw_allow_reindex in {"1", "true", "yes"}
-        if not raw_allow_reindex and self.deployment_mode in {"local", "render"}:
+        if not raw_allow_reindex and self.deployment_mode == "local":
             self.allow_reindex = True
         self.gemini_client = None
         self.openai_client = None

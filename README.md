@@ -53,7 +53,7 @@ pip install -r requirements.txt
 
 Ese archivo instala solo las dependencias necesarias para ejecutar el backend en despliegues ligeros como `Render` o `Vercel`.
 
-En la configuracion actual, `Render` tambien instala el stack de indexacion para poder reindexar automaticamente cuando detecta PDFs nuevos o actualizados.
+En la configuracion actual, `Render` arranca por defecto en modo liviano usando `backend/storage/chunk_cache.json` y el indice persistido ya generado. Eso evita cargar el stack pesado de embeddings durante el arranque y reduce mucho el riesgo de exceder memoria.
 
 Si tambien quieres reconstruir el indice localmente desde los PDFs, instala ademas:
 
@@ -115,8 +115,8 @@ Endpoints disponibles:
 
 Importante:
 
-- en produccion el backend puede arrancar usando `backend/storage/chunk_cache.json` sin cargar el stack pesado de embeddings;
-- eso reduce mucho el tiempo de inicio y evita instalar dependencias grandes que no se usan en cada arranque;
+- en produccion el backend arranca usando `backend/storage/chunk_cache.json` sin cargar el stack pesado de embeddings, salvo que actives `ALLOW_RUNTIME_REINDEX=true`;
+- eso reduce mucho el tiempo de inicio y ayuda a evitar picos de memoria en proveedores como `Render`;
 - para volver a generar `backend/storage/` desde cero si cambias PDFs, hazlo localmente con `requirements.indexing.txt` y luego sube los archivos actualizados.
 
 Ejemplo de cuerpo JSON para `/chat`:
@@ -208,15 +208,15 @@ CORS_ORIGINS=https://tu-dominio.vercel.app,https://chat.tudominio.com
 
 #### Opcionales
 
-En `Render`, la reindexacion en vivo queda activa automaticamente para detectar cambios en `backend/data/`.
+La reindexacion en vivo queda desactivada por defecto fuera de local para ahorrar memoria.
 
-Solo si quieres controlar ese comportamiento manualmente en otros despliegues:
+Solo si realmente quieres permitir que un despliegue reconstruya el indice en tiempo de ejecucion:
 
 ```text
 ALLOW_RUNTIME_REINDEX=true
 ```
 
-No se recomienda habilitarlo en Vercel salvo que entiendas bien el impacto, porque el sistema de archivos del backend es efimero.
+No se recomienda habilitarlo en `Vercel`, y en `Render` solo conviene hacerlo si tu instancia tiene memoria suficiente para cargar embeddings y reconstruir el indice.
 
 #### Variables que normalmente no necesitas en Vercel
 
