@@ -212,6 +212,7 @@ function App() {
   const [responseStyle, setResponseStyle] = useState("academico");
   const [backendLoadProgress, setBackendLoadProgress] = useState(7);
   const [backendStatus, setBackendStatus] = useState(initialBackendStatus);
+  const previousBackendStatusRef = useRef(initialBackendStatus.status);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
   const backendReady = backendStatus.status === "ok" && backendStatus.index_ready;
@@ -232,6 +233,9 @@ function App() {
   }, [input]);
 
   useEffect(() => {
+    const previousStatus = previousBackendStatusRef.current;
+    previousBackendStatusRef.current = backendStatus.status;
+
     if (Number.isFinite(backendStatus.init_progress) && backendStatus.init_progress > 0) {
       setBackendLoadProgress(backendStatus.init_progress);
       return undefined;
@@ -245,6 +249,10 @@ function App() {
     if (backendStatus.status === "error") {
       setBackendLoadProgress(0);
       return undefined;
+    }
+
+    if (backendStatus.status === "checking" && previousStatus !== "checking") {
+      setBackendLoadProgress(7);
     }
 
     const intervalId = window.setInterval(() => {
