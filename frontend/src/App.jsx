@@ -519,6 +519,7 @@ function App() {
             </div>
           </div>
           <p className="status-meta">{backendStatus.last_interaction_label}</p>
+          <p className="status-meta">{backendStatus.detail}</p>
           {!backendStatus.allow_reindex && (
             <p className="status-meta">
               El reindexado en vivo esta deshabilitado en este despliegue.

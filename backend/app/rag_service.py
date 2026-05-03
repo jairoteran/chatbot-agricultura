@@ -197,14 +197,17 @@ class RAGService:
         self.retriever = None
         self.indexed_files: list[str] = []
         self.chunk_cache: list[dict] = []
+        self.index_stale = False
+        self.index_detail = "Servicio listo"
         self.last_index_source = "startup"
         self.last_index_seconds = 0.0
         self.response_mode = "extractive"
         self.llm_provider = ""
         self.llm_model = ""
         self.deployment_mode = _detect_deployment_mode()
-        self.allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower() in {"1", "true", "yes"}
-        if self.deployment_mode == "local" and not os.getenv("ALLOW_RUNTIME_REINDEX"):
+        raw_allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower()
+        self.allow_reindex = raw_allow_reindex in {"1", "true", "yes"}
+        if not raw_allow_reindex and self.deployment_mode in {"local", "render"}:
             self.allow_reindex = True
         self.gemini_client = None
         self.openai_client = None
@@ -282,25 +285,29 @@ class RAGService:
     def _load_or_build_index(self, force_rebuild: bool = False) -> Any | None:
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        current_manifest = self._build_manifest()
+        self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
 
-        if not force_rebuild and self._can_boot_from_chunk_cache_only():
-            manifest = self._read_manifest()
-            self.indexed_files = [item["file_name"] for item in manifest.get("files", [])]
+        if (
+            not force_rebuild
+            and self._can_boot_from_chunk_cache_only()
+            and self._read_manifest() == current_manifest
+        ):
             self.chunk_cache = self._read_chunk_cache()
+            self.index_stale = False
+            self.index_detail = "Servicio listo"
             self.last_index_source = "chunk-cache"
             return None
 
-        documents = self._load_documents()
-        current_manifest = self._build_manifest(documents)
-        self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
-
-        if not documents:
+        if not current_manifest["files"]:
             if self._has_chunk_cache():
                 self.chunk_cache = self._read_chunk_cache()
                 self.last_index_source = "chunk-cache"
                 if not self.indexed_files:
                     stored_manifest = self._read_manifest()
                     self.indexed_files = [item["file_name"] for item in stored_manifest.get("files", [])]
+                self.index_stale = False
+                self.index_detail = "Servicio listo"
                 return None
 
             raise RuntimeError(
@@ -312,10 +319,22 @@ class RAGService:
 
             storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
             self.chunk_cache = self._read_chunk_cache()
+            self.index_stale = False
+            self.index_detail = "Servicio listo"
             self.last_index_source = "storage"
             return load_index_from_storage(storage_context)
 
         if self.deployment_mode != "local" and not self.allow_reindex:
+            if self._has_chunk_cache():
+                self.chunk_cache = self._read_chunk_cache()
+                self.index_stale = True
+                self.index_detail = (
+                    "Se detectaron cambios en backend/data, pero este despliegue no puede reindexar en vivo. "
+                    "Reconstruye backend/storage localmente y vuelve a desplegar."
+                )
+                self.last_index_source = "chunk-cache"
+                return None
+
             raise RuntimeError(
                 "No se encontro un indice persistido utilizable para este despliegue. "
                 "En Vercel debes incluir backend/storage actualizado en el repositorio o habilitar ALLOW_RUNTIME_REINDEX."
@@ -326,6 +345,7 @@ class RAGService:
                 "No fue posible cargar el backend de embeddings necesario para reconstruir el indice."
             )
 
+        documents = self._load_documents()
         from llama_index.core import VectorStoreIndex
         from llama_index.core.node_parser import SentenceSplitter
 
@@ -334,6 +354,8 @@ class RAGService:
         self.chunk_cache = self._serialize_nodes(nodes)
         index = VectorStoreIndex(nodes)
         index.storage_context.persist(persist_dir=str(STORAGE_DIR))
+        self.index_stale = False
+        self.index_detail = "Servicio listo"
         self.last_index_source = "rebuild"
         MANIFEST_FILE.write_text(
             json.dumps(current_manifest, indent=2, ensure_ascii=True),
@@ -390,12 +412,11 @@ class RAGService:
 
         return stored_manifest == current_manifest
 
-    def _build_manifest(self, documents: list) -> dict:
+    def _build_manifest(self) -> dict:
         files_by_path: dict[str, dict] = {}
 
-        for document in documents:
-            path = Path(document.metadata.get("file_path", ""))
-            if not path.exists():
+        for path in DATA_DIR.rglob("*.pdf"):
+            if not path.is_file():
                 continue
 
             stat = path.stat()
@@ -417,14 +438,38 @@ class RAGService:
             "files": files,
         }
 
+    def _refresh_index_if_needed(self) -> None:
+        current_manifest = self._build_manifest()
+        stored_manifest = self._read_manifest()
+        has_changes = stored_manifest != current_manifest
+
+        self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
+
+        if not has_changes:
+            self.index_stale = False
+            self.index_detail = "Servicio listo"
+            return
+
+        if self.allow_reindex and self.vector_backend_ready:
+            self.ensure_index_ready(force_rebuild=True)
+            self.index_detail = "Se detectaron PDFs nuevos o actualizados y el indice se reconstruyo."
+            return
+
+        self.index_stale = True
+        self.index_detail = (
+            "Se detectaron PDFs nuevos o actualizados, pero el indice actual no los incluye. "
+            "Reconstruye backend/storage o habilita el reindexado en vivo."
+        )
+
     def get_status(self) -> dict:
+        self._refresh_index_if_needed()
         return {
             "status": "ok",
-            "detail": "Servicio listo",
+            "detail": self.index_detail,
             "indexed_files": self.indexed_files,
             "indexed_documents": self._indexed_documents_payload(),
             "indexed_file_count": len(self.indexed_files),
-            "index_ready": bool(self.chunk_cache),
+            "index_ready": bool(self.chunk_cache) and not self.index_stale,
             "index_source": self.last_index_source,
             "last_index_seconds": self.last_index_seconds,
             "embed_model": self.embed_model_name,
@@ -465,8 +510,11 @@ class RAGService:
     ) -> dict:
         started_at = time.perf_counter()
         self._reset_current_usage()
+        self._refresh_index_if_needed()
         if not self.chunk_cache:
             raise RuntimeError("El indice documental aun no esta listo.")
+        if self.index_stale:
+            raise RuntimeError(self.index_detail)
 
         small_talk_answer = self._small_talk_answer(question)
         if small_talk_answer:
@@ -550,6 +598,9 @@ class RAGService:
     def summarize_document(self, file_name: str, response_style: str = "academico") -> dict:
         started_at = time.perf_counter()
         self._reset_current_usage()
+        self._refresh_index_if_needed()
+        if self.index_stale:
+            raise RuntimeError(self.index_detail)
         matching_chunks = [
             chunk for chunk in self.chunk_cache if chunk["file_name"].strip().lower() == file_name.strip().lower()
         ]

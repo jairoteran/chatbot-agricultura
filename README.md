@@ -53,6 +53,8 @@ pip install -r requirements.txt
 
 Ese archivo instala solo las dependencias necesarias para ejecutar el backend en despliegues ligeros como `Render` o `Vercel`.
 
+En la configuracion actual, `Render` tambien instala el stack de indexacion para poder reindexar automaticamente cuando detecta PDFs nuevos o actualizados.
+
 Si tambien quieres reconstruir el indice localmente desde los PDFs, instala ademas:
 
 ```powershell
@@ -206,7 +208,9 @@ CORS_ORIGINS=https://tu-dominio.vercel.app,https://chat.tudominio.com
 
 #### Opcionales
 
-Solo si quieres permitir reindexado en produccion:
+En `Render`, la reindexacion en vivo queda activa automaticamente para detectar cambios en `backend/data/`.
+
+Solo si quieres controlar ese comportamiento manualmente en otros despliegues:
 
 ```text
 ALLOW_RUNTIME_REINDEX=true
