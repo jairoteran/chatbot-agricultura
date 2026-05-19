@@ -1,0 +1,29 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - frontend/Dockerfile
+      - -t
+      - ${_IMAGE}
+      - --build-arg
+      - VITE_API_URL=${_VITE_API_URL}
+      - --build-arg
+      - VITE_HEALTH_URL=${_VITE_HEALTH_URL}
+      - --build-arg
+      - VITE_REINDEX_URL=${_VITE_REINDEX_URL}
+      - --build-arg
+      - VITE_SUMMARY_URL=${_VITE_SUMMARY_URL}
+      - --build-arg
+      - VITE_ADMIN_CONFIG_URL=${_VITE_ADMIN_CONFIG_URL}
+      - --build-arg
+      - VITE_ADMIN_SESSION_URL=${_VITE_ADMIN_SESSION_URL}
+      - --build-arg
+      - VITE_ADMIN_DOCUMENTS_URL=${_VITE_ADMIN_DOCUMENTS_URL}
+      - --build-arg
+      - VITE_ADMIN_BASE_PATH=${_VITE_ADMIN_BASE_PATH}
+      - --build-arg
+      - VITE_BASE_PATH=${_VITE_BASE_PATH}
+      - .
+images:
+  - ${_IMAGE}

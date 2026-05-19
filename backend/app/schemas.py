@@ -58,6 +58,22 @@ class HealthResponse(BaseModel):
     llm_model: str = ""
     deployment_mode: str = "local"
     allow_reindex: bool = True
+    document_storage_backend: str = "local"
+    index_storage_backend: str = "local"
+    metadata_backend: str = "none"
+    process_state_backend: str = "none"
+    documents_bucket: str = ""
+    indexes_bucket: str = ""
+    active_index_name: str = ""
+    runtime_active_index_name: str = ""
+    runtime_active_index_source: str = ""
+    runtime_last_reindex_status: str = ""
+    runtime_last_reindex_job_id: str = ""
+    runtime_reindex_progress: int = 0
+    runtime_reindex_stage: str = ""
+    runtime_reindex_detail: str = ""
+    runtime_reindex_total_documents: int = 0
+    runtime_reindex_processed_documents: int = 0
     last_interaction_label: str = "Sin consultas"
     last_response_ms: int = 0
     last_input_tokens: int = 0
@@ -93,3 +109,61 @@ class DocumentSummaryResponse(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+
+
+class AdminConfigResponse(BaseModel):
+    enabled: bool
+    provider: str = "google"
+    client_id: str = ""
+    admin_base_path: str = "/gestion"
+    session_ttl_seconds: int = 0
+
+
+class AdminGoogleSessionRequest(BaseModel):
+    credential: str = Field(..., min_length=20, description="ID token emitido por Google Identity Services")
+
+
+class AdminSessionResponse(BaseModel):
+    authenticated: bool
+    email: str = ""
+    display_name: str = ""
+    picture_url: str = ""
+    expires_at: int = 0
+    session_token: str = ""
+
+
+class AdminDocumentRecord(BaseModel):
+    file_name: str
+    relative_path: str
+    size: int
+    fingerprint: str = ""
+
+
+class AdminDocumentListResponse(BaseModel):
+    documents: list[AdminDocumentRecord] = Field(default_factory=list)
+    total_documents: int = 0
+    source: str = ""
+
+
+class AdminDocumentMutationResponse(BaseModel):
+    status: str
+    detail: str
+    document: AdminDocumentRecord | None = None
+
+
+class AdminDocumentUploadSessionRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    content_type: str = Field(default="application/pdf", min_length=1)
+    size: int = Field(..., gt=0)
+
+
+class AdminDocumentUploadSessionResponse(BaseModel):
+    status: str
+    detail: str
+    upload_url: str
+    relative_path: str
+    file_name: str
+
+
+class AdminDocumentUploadCompleteRequest(BaseModel):
+    relative_path: str = Field(..., min_length=1)

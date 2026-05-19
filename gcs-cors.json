@@ -1,0 +1,16 @@
+[
+  {
+    "origin": [
+      "https://tesis-producto-frontend-1025954944056.us-central1.run.app",
+      "http://localhost:5173"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "x-goog-resumable",
+      "x-upload-content-type",
+      "x-upload-content-length"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

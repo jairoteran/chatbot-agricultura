@@ -5,24 +5,29 @@ import os
 import re
 import time
 import unicodedata
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
+from app.settings import get_settings
+from app.cloud_layout import get_cloud_layout
+from app.document_repository import create_document_repository
+from app.index_models import ChunkCacheEntry, IndexManifest
+from app.index_repository import create_index_repository
+from app.metadata_repository import create_metadata_repository
+
+settings = get_settings()
+cloud_layout = get_cloud_layout(settings)
+index_repository = create_index_repository(settings, cloud_layout)
+metadata_repository = create_metadata_repository(settings, cloud_layout)
+document_repository = create_document_repository(settings, cloud_layout)
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-TOP_K = 5
-SIMILARITY_THRESHOLD = 0.35
-REQUIRED_STORAGE_FILES = (
-    "docstore.json",
-    "index_store.json",
-    "default__vector_store.json",
-)
-MANIFEST_FILE = STORAGE_DIR / "manifest.json"
-CHUNK_CACHE_FILE = STORAGE_DIR / "chunk_cache.json"
+OPENAI_MODEL = settings.openai_model
+GEMINI_MODEL = settings.gemini_model
+TOP_K = 4
+SIMILARITY_THRESHOLD = 0.42
+MAX_RESPONSE_EVIDENCE = 3
+MAX_RESPONSE_SOURCE_EXCERPT = 420
+MAX_LLM_EVIDENCE_CHARS = 900
 STOP_WORDS = {
     "a",
     "al",
@@ -182,23 +187,11 @@ RESPONSE_STYLE_GUIDANCE = {
         ),
     },
 }
-
-
-def _detect_deployment_mode() -> str:
-    if os.getenv("VERCEL") == "1":
-        return "vercel"
-    if os.getenv("RENDER") == "true":
-        return "render"
-    if os.getenv("RAILWAY_ENVIRONMENT"):
-        return "railway"
-    if os.getenv("FLY_APP_NAME"):
-        return "fly"
-    return "local"
-
-
 class RAGService:
-    def __init__(self, progress_callback=None) -> None:
+    def __init__(self, progress_callback=None, *, auto_initialize: bool = True, eager_embeddings: bool = True) -> None:
         self.progress_callback = progress_callback
+        self.auto_initialize = auto_initialize
+        self.eager_embeddings = eager_embeddings
         self.index: Any | None = None
         self.retriever = None
         self.indexed_files: list[str] = []
@@ -210,15 +203,26 @@ class RAGService:
         self.response_mode = "extractive"
         self.llm_provider = ""
         self.llm_model = ""
-        self.deployment_mode = _detect_deployment_mode()
-        raw_allow_reindex = os.getenv("ALLOW_RUNTIME_REINDEX", "").strip().lower()
-        self.allow_reindex = raw_allow_reindex in {"1", "true", "yes"}
-        if not raw_allow_reindex and self.deployment_mode == "local":
-            self.allow_reindex = True
+        self.deployment_mode = settings.deployment_target
+        self.allow_reindex = settings.allow_runtime_reindex
+        self.document_storage_backend = settings.document_storage_backend
+        self.index_storage_backend = settings.index_storage_backend
+        self.metadata_backend = settings.metadata_backend
+        self.process_state_backend = settings.process_state_backend
+        self.documents_bucket = settings.documents_bucket
+        self.indexes_bucket = settings.indexes_bucket
+        self.active_index_name = settings.active_index_name
+        self.runtime_storage_dir = settings.local_storage_dir
+        self.runtime_state = metadata_repository.get_runtime_state()
+        self.current_reindex_job_id = ""
+        self.current_reindex_total_documents = 0
+        self.current_reindex_processed_documents = 0
+        self.current_reindex_total_units = 0
+        self.current_reindex_completed_units = 0
         self.gemini_client = None
         self.openai_client = None
         self.vector_backend_ready = False
-        self.embed_model_name = ""
+        self.embed_model_name = EMBED_MODEL if self._should_prepare_vector_backend() else "lexical-only"
         self._manifest_cache: dict | None = None
         self._manifest_cache_signature: tuple[tuple[str, int, int], ...] | None = None
         self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -229,15 +233,64 @@ class RAGService:
         self.last_total_tokens = 0
         self._report_progress(5, "starting", "Preparando configuracion del servicio...")
         self._configure_llm_client()
-        self._report_progress(18, "embedding-setup", "Configurando el backend de embeddings...")
-        self._configure_embeddings()
-        self._report_progress(32, "index-check", "Verificando el indice documental...")
-        self.ensure_index_ready()
-        self._report_progress(100, "ready", "Servicio listo")
+        if self.eager_embeddings:
+            self._report_progress(18, "embedding-setup", "Configurando el backend de embeddings...")
+            self._configure_embeddings()
+        if self.auto_initialize:
+            self._report_progress(32, "index-check", "Verificando el indice documental...")
+            self.ensure_index_ready()
+            self._report_progress(100, "ready", "Servicio listo")
 
     def _report_progress(self, progress: int, stage: str, detail: str) -> None:
+        if self.current_reindex_job_id:
+            metadata_repository.update_reindex_progress(
+                self.current_reindex_job_id,
+                progress=progress,
+                stage=stage,
+                detail=detail,
+                total_documents=self.current_reindex_total_documents,
+                processed_documents=self.current_reindex_processed_documents,
+            )
+            self.runtime_state = metadata_repository.get_runtime_state()
         if self.progress_callback is not None:
             self.progress_callback(progress, stage, detail)
+
+    def _begin_reindex_progress(self, total_documents: int) -> None:
+        input_units = total_documents if self.document_storage_backend == "gcs" else 1
+        self.current_reindex_total_units = max(1, total_documents + input_units + 5)
+        self.current_reindex_completed_units = 0
+
+    def _set_reindex_progress(
+        self,
+        *,
+        stage: str,
+        detail: str,
+        default_progress: int,
+        completed_units: int | None = None,
+        increment_units: int = 0,
+    ) -> None:
+        if self.current_reindex_job_id and self.current_reindex_total_units > 0:
+            if completed_units is not None:
+                self.current_reindex_completed_units = max(
+                    0,
+                    min(completed_units, self.current_reindex_total_units),
+                )
+            elif increment_units:
+                self.current_reindex_completed_units = max(
+                    0,
+                    min(
+                        self.current_reindex_completed_units + increment_units,
+                        self.current_reindex_total_units,
+                    ),
+                )
+
+            real_progress = round(
+                (self.current_reindex_completed_units / self.current_reindex_total_units) * 100
+            )
+            self._report_progress(real_progress, stage, detail)
+            return
+
+        self._report_progress(default_progress, stage, detail)
 
     def _configure_llm_client(self) -> None:
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -265,8 +318,10 @@ class RAGService:
             except Exception:
                 self.openai_client = None
 
-    def _configure_embeddings(self) -> None:
-        if not self._should_prepare_vector_backend():
+    def _configure_embeddings(self, *, force: bool = False) -> None:
+        if self.vector_backend_ready:
+            return
+        if not self._should_prepare_vector_backend(force=force):
             self.vector_backend_ready = False
             self.embed_model_name = "lexical-only"
             return
@@ -288,6 +343,17 @@ class RAGService:
                     f"'{EMBED_MODEL}'. Detalle original: {exc}"
                 ) from exc
 
+    def _ensure_embeddings_ready(self, *, force: bool = False) -> None:
+        if self.vector_backend_ready or not self._should_prepare_vector_backend(force=force):
+            return
+        self._set_reindex_progress(
+            stage="embedding-setup",
+            detail="Configurando el backend de embeddings...",
+            default_progress=18,
+            increment_units=1,
+        )
+        self._configure_embeddings(force=force)
+
     def ensure_index_ready(self, force_rebuild: bool = False) -> None:
         started_at = time.perf_counter()
         self._report_progress(
@@ -304,57 +370,61 @@ class RAGService:
         self.last_index_seconds = round(time.perf_counter() - started_at, 2)
 
     def _load_or_build_index(self, force_rebuild: bool = False) -> Any | None:
-        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self._report_progress(42, "manifest-scan", "Analizando documentos y archivos del indice...")
+        materialized = index_repository.prepare_runtime_storage(self.embed_model_name)
+        self.runtime_storage_dir = materialized.storage_dir
+        self._set_reindex_progress(
+            stage="manifest-scan",
+            detail="Analizando documentos y archivos del indice...",
+            default_progress=42,
+            increment_units=1,
+        )
         current_manifest = self._build_manifest()
-        self.indexed_files = [item["file_name"] for item in current_manifest["files"]]
+        self.indexed_files = [item.file_name for item in current_manifest.files]
 
         if (
             not force_rebuild
             and self._can_boot_from_chunk_cache_only()
-            and self._read_manifest() == current_manifest
+            and materialized.manifest == current_manifest
         ):
             self._report_progress(72, "chunk-cache", "Cargando indice desde chunk cache...")
-            self.chunk_cache = self._read_chunk_cache()
+            self.chunk_cache = materialized.chunk_cache
             self.index_stale = False
             self.index_detail = "Servicio listo"
             self.last_index_source = "chunk-cache"
             return None
 
-        if not current_manifest["files"]:
-            if self._has_chunk_cache():
+        if not current_manifest.files:
+            if index_repository.has_materialized_index():
                 self._report_progress(72, "chunk-cache", "Cargando indice previamente almacenado...")
-                self.chunk_cache = self._read_chunk_cache()
+                self.chunk_cache = materialized.chunk_cache
                 self.last_index_source = "chunk-cache"
                 if not self.indexed_files:
-                    stored_manifest = self._read_manifest()
-                    self.indexed_files = [item["file_name"] for item in stored_manifest.get("files", [])]
+                    self.indexed_files = [item.file_name for item in materialized.manifest.files]
                 self.index_stale = False
                 self.index_detail = "Servicio listo"
                 return None
 
             raise RuntimeError(
-                "No se encontraron archivos PDF en backend/data ni un chunk_cache utilizable en backend/storage."
+                f"No se encontraron archivos PDF en {self._document_source_label()} ni un chunk_cache utilizable en backend/storage."
             )
 
         if not force_rebuild and self._has_usable_persisted_index(current_manifest):
             from llama_index.core import StorageContext, load_index_from_storage
 
             self._report_progress(78, "storage-index", "Cargando indice persistido...")
-            storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
-            self.chunk_cache = self._read_chunk_cache()
+            storage_context = StorageContext.from_defaults(persist_dir=str(self.runtime_storage_dir))
+            self.chunk_cache = materialized.chunk_cache
             self.index_stale = False
             self.index_detail = "Servicio listo"
             self.last_index_source = "storage"
             return load_index_from_storage(storage_context)
 
-        if self.deployment_mode != "local" and not self.allow_reindex:
-            if self._has_chunk_cache():
-                self.chunk_cache = self._read_chunk_cache()
+        if self.deployment_mode != "local" and not self.allow_reindex and not force_rebuild:
+            if index_repository.has_materialized_index():
+                self.chunk_cache = materialized.chunk_cache
                 self.index_stale = True
                 self.index_detail = (
-                    "Se detectaron cambios en backend/data, pero este despliegue no puede reindexar en vivo. "
+                    f"Se detectaron cambios en {self._document_source_label()}, pero este despliegue no puede reindexar en vivo. "
                     "Reconstruye backend/storage localmente y vuelve a desplegar."
                 )
                 self.last_index_source = "chunk-cache"
@@ -366,94 +436,148 @@ class RAGService:
             )
 
         if not self.vector_backend_ready:
+            self._ensure_embeddings_ready(force=force_rebuild)
+        if not self.vector_backend_ready:
             raise RuntimeError(
                 "No fue posible cargar el backend de embeddings necesario para reconstruir el indice."
             )
 
-        self._report_progress(55, "document-load", "Leyendo documentos PDF para reconstruir el indice...")
-        documents = self._load_documents()
+        self._set_reindex_progress(
+            stage="document-load",
+            detail="Preparando documentos PDF para reconstruir el indice...",
+            default_progress=55,
+        )
+        documents = self._load_documents(current_manifest.files)
         from llama_index.core import VectorStoreIndex
         from llama_index.core.node_parser import SentenceSplitter
 
-        self._report_progress(68, "node-build", "Dividiendo documentos en fragmentos analizables...")
+        self._set_reindex_progress(
+            stage="node-build",
+            detail="Dividiendo documentos en fragmentos analizables...",
+            default_progress=68,
+            increment_units=1,
+        )
         splitter = SentenceSplitter(chunk_size=700, chunk_overlap=120)
         nodes = splitter.get_nodes_from_documents(documents)
-        self._report_progress(82, "vector-index", "Construyendo el indice vectorial...")
+        self._set_reindex_progress(
+            stage="vector-index",
+            detail=f"Construyendo el indice vectorial con {len(nodes)} fragmentos...",
+            default_progress=82,
+            increment_units=1,
+        )
         self.chunk_cache = self._serialize_nodes(nodes)
         index = VectorStoreIndex(nodes)
-        self._report_progress(92, "persist-index", "Guardando el indice para futuros arranques...")
-        index.storage_context.persist(persist_dir=str(STORAGE_DIR))
+        build_dir = index_repository.get_build_dir()
+        self._set_reindex_progress(
+            stage="persist-index",
+            detail="Guardando el indice para futuros arranques...",
+            default_progress=92,
+            increment_units=1,
+        )
+        index.storage_context.persist(persist_dir=str(build_dir))
         self.index_stale = False
         self.index_detail = "Servicio listo"
         self.last_index_source = "rebuild"
-        MANIFEST_FILE.write_text(
-            json.dumps(current_manifest, indent=2, ensure_ascii=True),
-            encoding="utf-8",
+        pointer = index_repository.finalize_rebuild(build_dir, current_manifest, self.chunk_cache, source="rebuild")
+        metadata_repository.sync_documents(current_manifest, settings.documents_prefix)
+        metadata_repository.update_active_index(
+            pointer=pointer,
+            manifest=current_manifest,
+            source=self.index_storage_backend,
+            job_id=self.current_reindex_job_id,
+            status="success",
         )
-        CHUNK_CACHE_FILE.write_text(
-            json.dumps(self.chunk_cache, indent=2, ensure_ascii=True),
-            encoding="utf-8",
-        )
+        self.runtime_state = metadata_repository.get_runtime_state()
+        self.runtime_storage_dir = index_repository.get_runtime_storage_dir()
         return index
 
-    def _load_documents(self) -> list:
+    def _load_documents(self, manifest_files) -> list:
         from llama_index.core import SimpleDirectoryReader
 
-        return SimpleDirectoryReader(
-            input_dir=str(DATA_DIR),
-            required_exts=[".pdf"],
-            recursive=True,
-            filename_as_id=True,
-        ).load_data()
+        total_documents = len(manifest_files)
+        input_preparation_base = self.current_reindex_completed_units
+
+        def _input_preparation_progress(completed: int, total: int, relative_path: str) -> None:
+            detail = (
+                f"Preparando archivo {completed}/{total}: {Path(relative_path).name}"
+                if total > 0
+                else "Preparando documentos para el reindexado..."
+            )
+            self._set_reindex_progress(
+                stage="document-cache",
+                detail=detail,
+                default_progress=55,
+                completed_units=input_preparation_base + completed,
+            )
+
+        input_dir = document_repository.prepare_input_dir(progress_callback=_input_preparation_progress)
+        if self.document_storage_backend != "gcs":
+            self._set_reindex_progress(
+                stage="document-cache",
+                detail="Documentos locales listos para lectura.",
+                default_progress=55,
+                completed_units=input_preparation_base + 1,
+            )
+
+        parse_base = self.current_reindex_completed_units
+        documents = []
+        pdf_paths = sorted(input_dir.rglob("*.pdf"))
+        total_paths = len(pdf_paths)
+
+        for index, path in enumerate(pdf_paths, start=1):
+            documents.extend(
+                SimpleDirectoryReader(
+                    input_files=[str(path)],
+                    filename_as_id=True,
+                ).load_data()
+            )
+            self.current_reindex_processed_documents = index
+            self._set_reindex_progress(
+                stage="document-load",
+                detail=f"Leyendo documento {index}/{total_paths}: {path.name}",
+                default_progress=55,
+                completed_units=parse_base + index,
+            )
+
+        if total_documents == 0:
+            self._set_reindex_progress(
+                stage="document-load",
+                detail="No hay documentos para procesar.",
+                default_progress=55,
+            )
+
+        return documents
 
     def _has_chunk_cache(self) -> bool:
-        return MANIFEST_FILE.exists() and CHUNK_CACHE_FILE.exists()
+        return index_repository.has_materialized_index()
 
-    def _should_prepare_vector_backend(self) -> bool:
-        return self.deployment_mode == "local" or self.allow_reindex
+    def _should_prepare_vector_backend(self, *, force: bool = False) -> bool:
+        return force or self.deployment_mode == "local" or self.allow_reindex
 
     def _can_boot_from_chunk_cache_only(self) -> bool:
         return self._has_chunk_cache() and not self._should_prepare_vector_backend()
 
-    def _read_manifest(self) -> dict:
-        if not MANIFEST_FILE.exists():
-            return {"embed_model": self.embed_model_name, "files": []}
-        try:
-            return json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return {"embed_model": self.embed_model_name, "files": []}
+    def _read_manifest(self) -> IndexManifest:
+        return index_repository.prepare_runtime_storage(self.embed_model_name).manifest
 
     def _read_chunk_cache(self) -> list[dict]:
-        try:
-            return json.loads(CHUNK_CACHE_FILE.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("No fue posible leer backend/storage/chunk_cache.json.") from exc
+        return index_repository.prepare_runtime_storage(self.embed_model_name).chunk_cache
 
-    def _has_usable_persisted_index(self, current_manifest: dict) -> bool:
+    def _has_usable_persisted_index(self, current_manifest: IndexManifest) -> bool:
         if not self.vector_backend_ready:
             return False
 
-        has_required_files = all((STORAGE_DIR / file_name).exists() for file_name in REQUIRED_STORAGE_FILES)
-        if not has_required_files or not MANIFEST_FILE.exists() or not CHUNK_CACHE_FILE.exists():
+        if not index_repository.has_required_storage_files() or not index_repository.has_materialized_index():
             return False
 
         stored_manifest = self._read_manifest()
         return self._manifests_equivalent(stored_manifest, current_manifest)
 
-    def _build_manifest(self) -> dict:
-        file_entries: list[tuple[Path, os.stat_result, str]] = []
-
-        for path in DATA_DIR.rglob("*.pdf"):
-            if not path.is_file():
-                continue
-            stat = path.stat()
-            relative_path = str(path.relative_to(DATA_DIR)).replace("\\", "/")
-            file_entries.append((path, stat, relative_path))
-
-        file_entries.sort(key=lambda item: item[2])
+    def _build_manifest(self) -> IndexManifest:
+        file_entries = document_repository.list_pdf_files()
         cache_signature = tuple(
-            (relative_path, stat.st_size, stat.st_mtime_ns)
-            for _, stat, relative_path in file_entries
+            (item.relative_path, int(item.size), item.fingerprint)
+            for item in file_entries
         )
         if (
             self._manifest_cache is not None
@@ -461,57 +585,39 @@ class RAGService:
         ):
             return self._manifest_cache
 
-        files_by_path: dict[str, dict] = {}
-
-        for path, stat, relative_path in file_entries:
-            file_hash = self._hash_file_contents(path)
-            files_by_path[relative_path] = {
-                "file_name": path.name,
-                "relative_path": relative_path,
-                "size": stat.st_size,
-                "fingerprint": file_hash,
-            }
-
-        files = sorted(files_by_path.values(), key=lambda item: item["relative_path"])
-        manifest = {
-            "manifest_version": 2,
-            "embed_model": EMBED_MODEL,
-            "files": files,
-        }
+        files = tuple(sorted(file_entries, key=lambda item: item.relative_path))
+        manifest = IndexManifest(
+            manifest_version=2,
+            embed_model=EMBED_MODEL,
+            files=files,
+        )
         self._manifest_cache_signature = cache_signature
         self._manifest_cache = manifest
         return manifest
 
-    def _hash_file_contents(self, path: Path) -> str:
-        digest = sha256()
-        with path.open("rb") as file_handle:
-            for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _manifest_file_names(self, manifest: IndexManifest) -> list[str]:
+        return [item.file_name for item in manifest.files]
 
-    def _manifest_file_names(self, manifest: dict) -> list[str]:
-        return [item["file_name"] for item in manifest.get("files", [])]
-
-    def _manifests_equivalent(self, stored_manifest: dict, current_manifest: dict) -> bool:
-        if stored_manifest.get("embed_model") != current_manifest.get("embed_model"):
+    def _manifests_equivalent(self, stored_manifest: IndexManifest, current_manifest: IndexManifest) -> bool:
+        if stored_manifest.embed_model != current_manifest.embed_model:
             return False
 
-        stored_files = sorted(stored_manifest.get("files", []), key=lambda item: item.get("relative_path", ""))
-        current_files = sorted(current_manifest.get("files", []), key=lambda item: item.get("relative_path", ""))
+        stored_files = sorted(stored_manifest.files, key=lambda item: item.relative_path)
+        current_files = sorted(current_manifest.files, key=lambda item: item.relative_path)
         if len(stored_files) != len(current_files):
             return False
 
         strict_compare = (
-            stored_manifest.get("manifest_version") == 2
-            and current_manifest.get("manifest_version") == 2
+            stored_manifest.manifest_version == 2
+            and current_manifest.manifest_version == 2
         )
 
         for stored_item, current_item in zip(stored_files, current_files):
-            if stored_item.get("relative_path") != current_item.get("relative_path"):
+            if stored_item.relative_path != current_item.relative_path:
                 return False
-            if int(stored_item.get("size", -1)) != int(current_item.get("size", -1)):
+            if int(stored_item.size) != int(current_item.size):
                 return False
-            if strict_compare and stored_item.get("fingerprint") != current_item.get("fingerprint"):
+            if strict_compare and stored_item.fingerprint != current_item.fingerprint:
                 return False
 
         return True
@@ -530,21 +636,20 @@ class RAGService:
             self.index_detail = "Servicio listo"
             return
 
-        if self.allow_reindex and self.vector_backend_ready:
-            self.ensure_index_ready(force_rebuild=True)
-            self.index_detail = "Se detectaron PDFs nuevos o actualizados y el indice se reconstruyo."
-            return
-
         self.index_stale = True
         self.indexed_files = stored_files
         self.index_detail = (
-            f"Se detectaron {len(current_files)} PDFs en backend/data, pero solo {len(stored_files)} "
+            f"Se detectaron {len(current_files)} PDFs en {self._document_source_label()}, pero solo {len(stored_files)} "
             "estan realmente indexados en backend/storage. "
-            "Reconstruye backend/storage o habilita el reindexado en vivo."
+            "Ejecuta el reindexado manual desde el panel de administracion."
         )
 
     def get_status(self) -> dict:
         self._refresh_index_if_needed()
+        self.runtime_state = metadata_repository.get_runtime_state()
+        if bool(self.chunk_cache) and not self.index_stale and self.runtime_state.last_reindex_status != "success":
+            metadata_repository.reconcile_runtime_success()
+            self.runtime_state = metadata_repository.get_runtime_state()
         return {
             "status": "ok",
             "detail": self.index_detail,
@@ -562,6 +667,21 @@ class RAGService:
             "llm_model": self.llm_model,
             "deployment_mode": self.deployment_mode,
             "allow_reindex": self.allow_reindex,
+            "document_storage_backend": self.document_storage_backend,
+            "index_storage_backend": self.index_storage_backend,
+            "metadata_backend": self.metadata_backend,
+            "process_state_backend": self.process_state_backend,
+            "documents_bucket": self.documents_bucket,
+            "indexes_bucket": self.indexes_bucket,
+            "active_index_name": self.active_index_name,
+            "runtime_active_index_name": self.runtime_state.active_index_name,
+            "runtime_active_index_source": self.runtime_state.active_index_source,
+            "runtime_last_reindex_status": self.runtime_state.last_reindex_status,
+            "runtime_last_reindex_job_id": self.runtime_state.last_reindex_job_id,
+            "runtime_reindex_progress": self.runtime_state.reindex_progress,
+            "runtime_reindex_stage": self.runtime_state.reindex_stage,
+            "runtime_reindex_detail": self.runtime_state.reindex_detail,
+            "runtime_reindex_total_documents": self.runtime_state.reindex_total_documents,
             "last_interaction_label": self.last_interaction_label,
             "last_response_ms": self.last_response_ms,
             "last_input_tokens": self.last_input_tokens,
@@ -570,13 +690,66 @@ class RAGService:
         }
 
     def reindex(self) -> dict:
-        if not self.allow_reindex:
-            raise RuntimeError(
-                "La reindexacion en tiempo de ejecucion esta deshabilitada en este despliegue. "
-                "Reconstruye el indice antes de desplegar o habilita ALLOW_RUNTIME_REINDEX."
-            )
+        current_manifest = self._build_manifest()
+        stored_manifest = self._read_manifest()
+        self.indexed_files = self._manifest_file_names(current_manifest)
 
-        self.ensure_index_ready(force_rebuild=True)
+        if (
+            self._manifests_equivalent(stored_manifest, current_manifest)
+            and index_repository.has_materialized_index()
+            and index_repository.has_required_storage_files()
+        ):
+            self.chunk_cache = self._read_chunk_cache()
+            self.index_stale = False
+            self.index_detail = "El indice ya estaba actualizado. No fue necesario reconstruirlo."
+            self.last_index_source = "storage"
+            self.runtime_state = metadata_repository.get_runtime_state()
+            return {
+                "status": "ok",
+                "detail": self.index_detail,
+                "indexed_files": self.indexed_files,
+                "indexed_documents": self._indexed_documents_payload(),
+                "index_source": self.last_index_source,
+                "last_index_seconds": 0.0,
+            }
+
+        self.current_reindex_total_documents = len(current_manifest.files)
+        self.current_reindex_processed_documents = 0
+        self._begin_reindex_progress(self.current_reindex_total_documents)
+        job_id = metadata_repository.start_reindex_job(
+            trigger="api",
+            source=self.deployment_mode,
+            total_documents=self.current_reindex_total_documents,
+        )
+        self.current_reindex_job_id = job_id
+        try:
+            self._ensure_embeddings_ready(force=True)
+            self.ensure_index_ready(force_rebuild=True)
+        except Exception as exc:
+            metadata_repository.finish_reindex_job(
+                job_id,
+                status="failed",
+                error_message=str(exc),
+            )
+            self.runtime_state = metadata_repository.get_runtime_state()
+            self.current_reindex_job_id = ""
+            self.current_reindex_total_documents = 0
+            self.current_reindex_processed_documents = 0
+            self.current_reindex_total_units = 0
+            self.current_reindex_completed_units = 0
+            raise
+
+        metadata_repository.finish_reindex_job(
+            job_id,
+            status="success",
+            release_name=self.runtime_state.active_index_name or self.active_index_name,
+        )
+        self.runtime_state = metadata_repository.get_runtime_state()
+        self.current_reindex_job_id = ""
+        self.current_reindex_total_documents = 0
+        self.current_reindex_processed_documents = 0
+        self.current_reindex_total_units = 0
+        self.current_reindex_completed_units = 0
         return {
             "status": "ok",
             "detail": "Indice reconstruido correctamente",
@@ -627,7 +800,7 @@ class RAGService:
 
         filtered_nodes = [
             item for item in merged_candidates if item["keyword_overlap"] > 0
-        ] or merged_candidates[:3]
+        ] or merged_candidates[:MAX_RESPONSE_EVIDENCE]
 
         if not filtered_nodes:
             result = {
@@ -644,11 +817,11 @@ class RAGService:
         source_chunks = []
         evidence_blocks = []
 
-        for item in filtered_nodes[:4]:
+        for item in filtered_nodes[:MAX_RESPONSE_EVIDENCE]:
             file_name = item["file_name"]
             page_label = item.get("page_label", "")
             normalized_text = item["text"]
-            excerpt = normalized_text[:650]
+            excerpt = normalized_text[:MAX_RESPONSE_SOURCE_EXCERPT]
             score = item["score"]
 
             source_chunks.append(
@@ -813,7 +986,7 @@ class RAGService:
             key=lambda item: (item["keyword_overlap"], item["score"], len(item["text"])),
             reverse=True,
         )
-        return candidates[:8]
+        return candidates[:6]
 
     def _merge_candidates(self, vector_candidates: list[dict], lexical_candidates: list[dict]) -> list[dict]:
         merged: dict[tuple[str, str], dict] = {}
@@ -833,7 +1006,7 @@ class RAGService:
             key=lambda item: (item["keyword_overlap"], item["score"], len(item["text"])),
             reverse=True,
         )
-        return ranked[:8]
+        return ranked[:6]
 
     def _serialize_nodes(self, nodes: list) -> list[dict]:
         serialized = []
@@ -845,15 +1018,31 @@ class RAGService:
                 continue
 
             serialized.append(
-                {
-                    "file_name": self._node_file_name(metadata),
-                    "page_label": self._node_page_label(metadata),
-                    "text": text,
-                    "tokens": sorted(self._normalize_tokens(text)),
-                }
+                ChunkCacheEntry(
+                    file_name=self._node_file_name(metadata),
+                    page_label=self._node_page_label(metadata),
+                    text=text,
+                    tokens=tuple(sorted(self._normalize_tokens(text))),
+                ).to_dict()
             )
 
         return serialized
+
+    def cloud_index_contract(self) -> dict:
+        release_example = "YYYYMMDD-HHMMSS"
+        return {
+            "documents_bucket": self.documents_bucket,
+            "indexes_bucket": self.indexes_bucket,
+            "active_index_name": self.active_index_name,
+            "document_example_blob": cloud_layout.document_blob_path("carpeta/documento.pdf"),
+            "active_pointer_blob": cloud_layout.active_index_pointer_blob(),
+            "release_prefix_example": cloud_layout.index_release_prefix(release_example),
+            "release_manifest_blob_example": cloud_layout.release_manifest_blob(release_example),
+            "release_chunk_cache_blob_example": cloud_layout.release_chunk_cache_blob(release_example),
+            "firestore_documents_collection": settings.firestore_documents_collection,
+            "firestore_jobs_collection": settings.firestore_jobs_collection,
+            "firestore_runtime_collection": settings.firestore_runtime_collection,
+        }
 
     def _node_file_name(self, metadata: dict) -> str:
         return metadata.get("file_name") or metadata.get("filename") or "Documento"
@@ -960,6 +1149,9 @@ class RAGService:
             return file_name
 
         return self._title_case_spanish(cleaned)
+
+    def _document_source_label(self) -> str:
+        return document_repository.describe_source()
 
     def _repair_mojibake(self, text: str) -> str:
         cleaned = unicodedata.normalize("NFKC", text)
@@ -1093,12 +1285,9 @@ class RAGService:
         evidence_text = self._format_evidence_for_llm(evidence_blocks)
         conversation_text = self._format_history_for_llm(history)
         prompt = (
-            "Responde en espanol como un asistente conversacional que analiza documentos.\n"
-            "Tu tarea es razonar sobre la evidencia recuperada y explicarla con claridad.\n"
-            "No copies frases largas del contexto. Sintetiza, conecta ideas y responde como un verdadero chatbot.\n"
-            "Debes usar solo la evidencia proporcionada. Si la evidencia no alcanza, dilo claramente.\n"
-            "No inventes datos ni cites paginas inexistentes.\n"
-            "Prefiere una respuesta natural y organizada.\n"
+            "Responde en espanol con claridad y usando solo la evidencia dada.\n"
+            "Sintetiza, conecta ideas y evita copiar frases largas.\n"
+            "Si la evidencia no alcanza, dilo claramente. No inventes datos.\n"
             f"{style_config['llm_instruction']}\n"
             "\n"
             "Historial reciente:\n"
@@ -1108,12 +1297,10 @@ class RAGService:
             "Evidencia recuperada:\n"
             f"{evidence_text}\n\n"
             "Instrucciones de salida:\n"
-            "1. Responde de forma clara y directa.\n"
-            "2. Explica el sentido de la informacion, no la repitas literalmente.\n"
-            f"3. Organiza la respuesta con estas secciones cuando aporten claridad: {style_config['sections'][0]}, {style_config['sections'][1]}, {style_config['sections'][2]}.\n"
-            "4. Usa listas con guiones si enumeras ideas y adapta el nivel de detalle al estilo solicitado.\n"
-            f"5. Si notas limites o ambiguedades en la evidencia, mencionalos al final en una frase breve bajo {style_config['sections'][3]}.\n"
-            f"6. Si mencionas temas complementarios, presentalos bajo {style_config['related_label']}.\n"
+            "1. Responde de forma directa.\n"
+            f"2. Usa estas secciones solo si aportan claridad: {style_config['sections'][0]}, {style_config['sections'][1]}, {style_config['sections'][2]}.\n"
+            "3. Usa listas con guiones solo cuando realmente ayuden.\n"
+            f"4. Si hay limites o ambiguedades, cierralos bajo {style_config['sections'][3]}.\n"
         )
 
         try:
@@ -1150,9 +1337,11 @@ class RAGService:
 
     def _format_evidence_for_llm(self, evidence_blocks: list[tuple[str, str, float, str]]) -> str:
         blocks = []
-        for index, (file_name, page_label, score, text) in enumerate(evidence_blocks[:4], start=1):
+        for index, (file_name, page_label, score, text) in enumerate(
+            evidence_blocks[:MAX_RESPONSE_EVIDENCE], start=1
+        ):
             blocks.append(
-                f"[Fuente {index}] Documento: {self._display_title(file_name)} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:1400]}"
+                f"[Fuente {index}] Documento: {self._display_title(file_name)} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:MAX_LLM_EVIDENCE_CHARS]}"
             )
         return "\n\n".join(blocks)
 

@@ -1,144 +1,124 @@
 # PDF Chat App
 
-Proyecto web con dos carpetas:
+Aplicacion web para consultar documentos PDF con una interfaz de chat. El proyecto usa un frontend en React y un backend en FastAPI con capacidades RAG para recuperar, resumir y explicar informacion de los documentos.
 
-- `backend`: API en FastAPI + LlamaIndex para cargar PDFs, construir un indice vectorial y responder preguntas.
-- `frontend`: interfaz web en React con una experiencia de chat enfocada en documentos.
+## Estado actual
 
-El objetivo del proyecto es que el asistente no solo recupere texto desde los documentos, sino que tambien lo analice y lo explique con lenguaje claro, como un chatbot conversacional.
+La arquitectura local actual sigue funcionando con:
 
-## Listo para Vercel
+- `frontend/`: interfaz web en React + Vite
+- `backend/`: API en FastAPI + servicio RAG
+- `backend/data/`: PDFs locales de desarrollo
+- `backend/storage/`: indice persistido local heredado de la etapa anterior
 
-El repositorio ya incluye configuracion para desplegarse en `Vercel` con:
+La siguiente etapa del proyecto migra a una arquitectura en Google Cloud orientada a crecimiento y operacion mas profesional.
 
-- frontend `Vite` construido desde `frontend/`
-- backend `FastAPI` expuesto como funcion Python desde `api/index.py`
-- `vercel.json` con `buildCommand`, `outputDirectory` y exclusions para reducir el bundle
-- `requirements.txt` en la raiz para que Vercel instale las dependencias de Python
-- `.python-version` fijado en `3.12`
+## Arquitectura objetivo
 
-Importante para produccion:
+La arquitectura recomendada para esta etapa es:
 
-- En Vercel el backend se ejecuta sobre un sistema de archivos efimero.
-- Por eso, este proyecto asume que `backend/storage/` ya va incluido y actualizado en el repositorio.
-- El boton `Reindexar PDFs` queda deshabilitado en despliegues Vercel salvo que habilites `ALLOW_RUNTIME_REINDEX=true`.
-- La recomendacion es reindexar localmente, confirmar que `backend/storage/` quedo actualizado y luego hacer deploy.
+- `Frontend`: Firebase Hosting
+- `Backend API`: Cloud Run
+- `Reindexado`: Cloud Run Jobs
+- `PDFs e indices`: Cloud Storage
+- `Estado de documentos y procesos`: Firestore
+- `Secrets`: Secret Manager
 
-## Estructura
+Documentacion principal:
+
+- [Arquitectura objetivo](docs/architecture.md)
+- [Contrato cloud](docs/cloud-contract.md)
+- [Estado del proyecto](docs/project-status.md)
+- [Guia de documentacion](docs/README.md)
+
+## Estructura del repositorio
 
 ```text
+api/
 backend/
-  app/
-  data/
-  storage/
 frontend/
-  src/
+scripts/
+docs/
 ```
 
-## Backend
+## Desarrollo local
 
-### 1. Crear entorno virtual
+### Backend
 
 ```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-```
-
-### 2. Instalar dependencias
-
-```powershell
 pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Ese archivo instala solo las dependencias necesarias para ejecutar el backend en despliegues ligeros como `Render` o `Vercel`.
-
-En la configuracion actual, `Render` arranca por defecto en modo liviano usando `backend/storage/chunk_cache.json` y el indice persistido ya generado. Eso evita cargar el stack pesado de embeddings durante el arranque y reduce mucho el riesgo de exceder memoria.
-
-Si tambien quieres reconstruir el indice localmente desde los PDFs, instala ademas:
+Si tambien vas a reconstruir indices localmente durante desarrollo:
 
 ```powershell
 pip install -r requirements.indexing.txt
 ```
 
-### 3. Configurar el modo conversacional con LLM
-
-Si quieres que el asistente razone y redacte como un chatbot real, configura una clave de API en el backend.
-
-### Opcion recomendada para pruebas gratis: Gemini
-
-El backend ahora prioriza `Gemini` si encuentra `GEMINI_API_KEY`. Si no encuentra esa variable, intenta usar `OpenAI`. Si no encuentra ninguna, responde con el modo local basico.
-
-El backend carga automaticamente variables desde `backend/.env`, y ese archivo ya esta ignorado por Git para no exponer claves.
+Para ejecutar el reindexado como proceso batch independiente del servidor web:
 
 ```powershell
-$env:GEMINI_API_KEY="tu_clave"
+.venv\Scripts\python -m app.reindex_job
 ```
 
-Opcionalmente puedes elegir el modelo:
-
-```powershell
-$env:GEMINI_MODEL="gemini-2.5-flash"
-```
-
-Segun la documentacion oficial de Google revisada el `28 de abril de 2026`, Gemini API ofrece un nivel `free` y un nivel `pay-as-you-go`, con cuotas y modelos que dependen del proyecto y del modelo usado.
-
-### Opcion alternativa: OpenAI
-
-```powershell
-$env:OPENAI_API_KEY="tu_clave"
-```
-
-Opcionalmente puedes elegir el modelo:
-
-```powershell
-$env:OPENAI_MODEL="gpt-5.4-mini"
-```
-
-Si no defines ni `GEMINI_API_KEY` ni `OPENAI_API_KEY`, la aplicacion seguira respondiendo con un modo basico basado en recuperacion y sintesis local.
-
-### 4. Agregar PDFs
-
-Coloca tus archivos PDF dentro de `backend/data/`.
-
-### 5. Iniciar el servidor
-
-```powershell
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-Endpoints disponibles:
-
-- `GET /health`: estado del backend, cantidad de archivos indexados y diagnostico.
-- `POST /chat`: responde preguntas usando solo el contenido recuperado de los PDFs, pero sintetizando los hallazgos en un lenguaje mas claro en lugar de devolver citas literales como respuesta principal.
-- `POST /reindex`: reconstruye el indice cuando agregas o cambias documentos.
-
-Importante:
-
-- en produccion el backend arranca usando `backend/storage/chunk_cache.json` sin cargar el stack pesado de embeddings, salvo que actives `ALLOW_RUNTIME_REINDEX=true`;
-- eso reduce mucho el tiempo de inicio y ayuda a evitar picos de memoria en proveedores como `Render`;
-- para volver a generar `backend/storage/` desde cero si cambias PDFs, hazlo localmente con `requirements.indexing.txt` y luego sube los archivos actualizados.
-
-Ejemplo de cuerpo JSON para `/chat`:
-
-```json
-{
-  "question": "Que dice el documento sobre enfermedades del cultivo de papa?"
-}
-```
-
-## Frontend
-
-### 1. Instalar dependencias
+### Frontend
 
 ```powershell
 cd frontend
 npm install
+npm run dev
 ```
 
-### 2. Configurar variables opcionales
+## Despliegue del frontend
 
-Puedes crear `frontend/.env` a partir de `frontend/.env.example`, que ya esta incluido en el repo.
+Hay dos caminos preparados:
+
+- `Firebase Hosting`, si el proyecto tiene permisos y un Hosting site creado
+- `Cloud Run`, como alternativa directa cuando ya tienes permisos de despliegue sobre servicios Cloud Run
+
+En el estado actual, el camino mas directo es `Cloud Run`.
+
+Build de imagen:
+
+```powershell
+.\scripts\build-frontend-image.ps1
+```
+
+Deploy:
+
+```powershell
+.\scripts\deploy-frontend-cloudrun.ps1
+```
+
+Si el frontend se publica en un dominio distinto al backend, recuerda desplegar la API con `CORS_ORIGINS` incluyendo la URL publica del frontend.
+
+### Inicio rapido desde la raiz
+
+```powershell
+.\start-all.ps1
+```
+
+## Variables de entorno locales
+
+Backend:
+
+```powershell
+$env:GEMINI_API_KEY="tu_clave"
+$env:GEMINI_MODEL="gemini-2.5-flash"
+```
+
+O alternativamente:
+
+```powershell
+$env:OPENAI_API_KEY="tu_clave"
+$env:OPENAI_MODEL="gpt-5.4-mini"
+```
+
+Frontend opcional:
 
 ```env
 VITE_API_URL=/api/chat
@@ -147,322 +127,29 @@ VITE_REINDEX_URL=/api/reindex
 VITE_SUMMARY_URL=/api/summarize-document
 ```
 
-### 3. Iniciar el frontend
+Puedes partir de:
 
-```powershell
-npm run dev
-```
+- `backend/.env.example`
+- `frontend/.env.example`
 
-La aplicacion quedara disponible en `http://localhost:5173`.
+Para la migracion cloud, el backend ya contempla:
 
-Durante desarrollo, el frontend usa un proxy de Vite hacia `http://localhost:8000`, por lo que no deberias tener problemas de CORS si ambos servicios estan levantados.
+- `INDEX_STORAGE_BACKEND=local|gcs`
+- `METADATA_BACKEND=none|firestore`
+- `PROCESS_STATE_BACKEND=none|firestore`
 
-## Despliegue en Vercel
+## Endpoints actuales
 
-### 1. Importar el proyecto
+- `GET /health`
+- `POST /chat`
+- `POST /reindex`
+- `POST /summarize-document`
 
-1. Entra a `Vercel`.
-2. Pulsa `Add New Project`.
-3. Conecta tu repositorio de GitHub.
-4. Selecciona este repositorio.
-5. Deja como `Root Directory` la raiz del proyecto.
-6. Vercel usara la configuracion incluida en `vercel.json`.
+## Criterio de documentacion del proyecto
 
-La configuracion esperada ya queda resuelta desde el repositorio:
+Este repositorio se va a mantener con documentacion viva. Cada cambio importante debe reflejarse al menos en:
 
-- `buildCommand`: `npm --prefix frontend run build`
-- `outputDirectory`: `frontend/dist`
-- backend Python expuesto desde `api/index.py`
+- [docs/project-status.md](docs/project-status.md): que se hizo, que falta y bloqueos
+- [docs/architecture.md](docs/architecture.md): si cambia la arquitectura objetivo o una decision tecnica importante
 
-### 2. Variables de entorno que debes agregar
-
-#### Requeridas para usar un modelo generativo
-
-Si vas a usar `Gemini`:
-
-```text
-GEMINI_API_KEY=tu_clave
-GEMINI_MODEL=gemini-2.5-flash
-```
-
-Si vas a usar `OpenAI`:
-
-```text
-OPENAI_API_KEY=tu_clave
-OPENAI_MODEL=gpt-5.4-mini
-```
-
-No necesitas configurar ambos proveedores a la vez. El backend prioriza `Gemini` si encuentra `GEMINI_API_KEY`.
-
-#### Recomendadas para produccion
-
-```text
-CORS_ORIGINS=https://tu-dominio.vercel.app
-```
-
-Si luego conectas un dominio propio, agrega tambien ese dominio:
-
-```text
-CORS_ORIGINS=https://tu-dominio.vercel.app,https://chat.tudominio.com
-```
-
-#### Opcionales
-
-La reindexacion en vivo queda desactivada por defecto fuera de local para ahorrar memoria.
-
-Solo si realmente quieres permitir que un despliegue reconstruya el indice en tiempo de ejecucion:
-
-```text
-ALLOW_RUNTIME_REINDEX=true
-```
-
-No se recomienda habilitarlo en `Vercel`, y en `Render` solo conviene hacerlo si tu instancia tiene memoria suficiente para cargar embeddings y reconstruir el indice.
-
-#### Variables que normalmente no necesitas en Vercel
-
-En el frontend desplegado en Vercel, normalmente no hace falta definir:
-
-```text
-VITE_API_URL
-VITE_HEALTH_URL
-VITE_REINDEX_URL
-VITE_SUMMARY_URL
-```
-
-Eso es porque el frontend ya usa rutas relativas como `/api/chat`, `/api/health` y `/api/summarize-document`, que funcionan bien cuando frontend y backend viven en el mismo proyecto de Vercel.
-
-### 3. Donde agregar los environments en Vercel
-
-Cuando agregues variables de entorno, puedes asignarlas a:
-
-- `Production`: para el sitio publicado real
-- `Preview`: para despliegues de ramas o pull requests
-- `Development`: si luego quieres usar `vercel dev`
-
-Recomendacion practica:
-
-- agrega `GEMINI_API_KEY` o `OPENAI_API_KEY` al menos en `Production`
-- si vas a probar ramas, agrega tambien las mismas variables a `Preview`
-- deja `Development` opcional si trabajas localmente con `backend/.env`
-
-### 4. Flujo recomendado antes de desplegar
-
-1. Coloca o actualiza tus PDFs en `backend/data/`.
-2. Ejecuta localmente el backend y usa `Reindexar PDFs` o reconstruye el indice.
-3. Verifica que `backend/storage/` se actualizo correctamente.
-4. Confirma que `backend/storage/` quedo versionado en Git junto con los cambios de `backend/data/`.
-5. Sube esos cambios al repositorio.
-6. Despliega en Vercel.
-
-### 5. Que esperar en produccion
-
-- Las rutas del backend quedaran bajo `/api`, por ejemplo `/api/health` y `/api/chat`.
-- El frontend consumira esas rutas automaticamente.
-- El estado del backend deberia mostrar `Despliegue: Vercel`.
-- El boton `Reindexar PDFs` queda deshabilitado por defecto.
-- Si `backend/storage/` no coincide con `backend/data/`, el despliegue puede iniciar en error porque no podra reconstruir el indice por defecto dentro de Vercel.
-
-### 6. Lista minima recomendada de variables
-
-Para una configuracion simple con Gemini:
-
-```text
-GEMINI_API_KEY=tu_clave
-GEMINI_MODEL=gemini-2.5-flash
-CORS_ORIGINS=https://tu-proyecto.vercel.app
-```
-
-Para una configuracion simple con OpenAI:
-
-```text
-OPENAI_API_KEY=tu_clave
-OPENAI_MODEL=gpt-5.4-mini
-CORS_ORIGINS=https://tu-proyecto.vercel.app
-```
-
-### 7. Verificacion despues del deploy
-
-Despues de desplegar, revisa:
-
-1. `https://tu-proyecto.vercel.app/api/health`
-2. que el frontend cargue sin errores
-3. que el estado muestre documentos indexados
-4. que una pregunta sencilla responda correctamente
-
-Si `/api/health` responde con error, revisa principalmente:
-
-- variables de entorno faltantes
-- `backend/storage/` desactualizado o ausente
-- limites del proveedor de IA
-- errores de importacion o dependencias en el build log
-
-## Iniciar todo con un solo script
-
-Despues de instalar dependencias en ambos servicios, puedes arrancar todo desde la raiz del proyecto:
-
-```powershell
-.\start-all.ps1
-```
-
-Eso abrira dos ventanas nuevas de PowerShell:
-
-- una para el backend en `http://localhost:8000`
-- otra para el frontend en `http://localhost:5173`
-
-Si prefieres ejecutarlos en segundo plano dentro de la misma sesion:
-
-```powershell
-.\start-all.ps1 -NoNewWindows
-```
-
-## Mejoras incluidas
-
-1. El backend detecta cambios en los PDFs y reutiliza el indice persistido cuando no hubo cambios.
-2. El indice vectorial se persiste en `backend/storage/` y puede reconstruirse manualmente.
-3. El backend expone estado de salud y reindexacion manual.
-4. El frontend muestra el estado del backend, las fuentes usadas y un boton de reindexado.
-5. Si no hay evidencia suficiente, el sistema responde claramente que no encontro informacion suficiente.
-6. Las respuestas del chat priorizan sintesis y analisis de los fragmentos recuperados antes que copiar texto del documento.
-7. Si se configura una API key de Gemini o OpenAI, el backend puede usar un modelo generativo para responder con continuidad conversacional y mejor razonamiento.
-
-## Sobre el "entrenamiento"
-
-Para este proyecto no hace falta entrenar un modelo con tus PDFs. Lo que si hace falta es una arquitectura que:
-
-1. recupere los fragmentos mas relevantes del documento;
-2. pase esa evidencia a un modelo que pueda razonar y redactar;
-3. reformule la respuesta de forma entendible y conversacional.
-
-Antes, el proyecto hacia bien el paso 1, pero el paso 2 y 3 eran muy limitados, por eso la salida se parecia demasiado al texto original. La version actual puede usar un modelo generativo para analizar la evidencia recuperada, mantener continuidad con el historial reciente y responder de forma mucho mas parecida a un chatbot real.
-
-## ChatGPT Plus, API y costos
-
-Tener `ChatGPT Plus` no incluye creditos para la API. Son productos separados:
-
-- `ChatGPT Plus` sirve para usar ChatGPT desde la web o la app.
-- La `API` se cobra aparte y es la que necesita este proyecto para responder desde el backend.
-
-En otras palabras, aunque tengas Plus, para que este proyecto use un modelo generativo desde codigo necesitas una API key y facturacion de API.
-
-## Opciones de proveedor
-
-### 1. Google Gemini
-
-Ventajas:
-
-- es la opcion mas conveniente para probar sin pagar al inicio;
-- el backend ya puede usarlo directamente;
-- tiene free tier oficial segun el proyecto y el modelo.
-
-Desventaja:
-
-- las cuotas gratis tienen limites y pueden variar segun el modelo.
-
-Modelo recomendado para empezar:
-
-- `gemini-2.5-flash`
-
-### 2. OpenAI
-
-Ventajas:
-
-- integracion directa con el backend actual;
-- buena calidad para respuestas tipo chatbot;
-- buen equilibrio entre costo y calidad con modelos mini.
-
-Desventaja:
-
-- no ofrece un free tier general de API para pruebas.
-
-Modelo recomendado para este proyecto:
-
-- `gpt-5.4-mini`
-
-### 3. Anthropic / Claude
-
-Ventajas:
-
-- muy buena capacidad de redaccion y analisis;
-- buena opcion si prefieres el estilo de Claude.
-
-Desventajas:
-
-- no es la opcion mas barata para este caso;
-- no aparece un free tier general de API como opcion principal para pruebas.
-
-Opciones razonables:
-
-- `Claude Haiku 3.5` si buscas abaratar;
-- `Claude Sonnet 4` si priorizas calidad por encima del costo.
-
-## Cual conviene usar
-
-Si el objetivo es subir el proyecto y dejarlo listo para mostrar:
-
-- usa `Gemini` si quieres hacer pruebas gratis o con el menor gasto posible;
-- usa `OpenAI` si quieres una alternativa estable con buena calidad y costo razonable;
-- usa `Claude` si ya decidiste pagar y prefieres ese proveedor por estilo de respuesta.
-
-## Opcion para pruebas
-
-De las opciones evaluadas, la mas clara para pruebas es `Gemini`, porque su documentacion oficial indica que maneja un nivel `free` y un nivel `pay-as-you-go`, dependiendo del modelo.
-
-En cambio:
-
-- `OpenAI API` no incluye uso gratis general por tener ChatGPT Plus;
-- `Claude API` no aparece como la opcion principal para pruebas gratuitas generales.
-
-## Costos orientativos
-
-Estos valores pueden cambiar, asi que conviene verificarlos antes de publicar o desplegar. Como referencia, para un proyecto RAG como este:
-
-- `OpenAI mini` suele ser una opcion equilibrada en costo/calidad.
-- `Gemini Flash-Lite` suele ser de las opciones mas baratas.
-- `Claude Haiku` suele ser mas barato que `Claude Sonnet`, pero aun asi no siempre gana frente a Gemini u OpenAI mini.
-
-Si cada consulta envia contexto del documento y recibe una respuesta corta o media, el costo por pregunta normalmente puede mantenerse bajo usando modelos mini o lite.
-
-## Recomendacion para este repositorio
-
-Para dejar el proyecto listo para subir:
-
-1. Usar `Gemini` como opcion principal para pruebas porque ya esta integrado en el backend y puede aprovechar el free tier.
-2. Usar `Gemini` como primera opcion para pruebas y validacion inicial.
-3. Mantener `OpenAI` como respaldo opcional cuando quieras comparar calidad o comportamiento.
-
-## Hace falta una base de datos?
-
-No necesariamente.
-
-Con la arquitectura actual no hace falta una base de datos para responder preguntas sobre tus PDFs, porque el proyecto ya persiste lo necesario en archivos dentro de `backend/storage/`.
-
-Una base de datos solo seria recomendable si luego quieres alguna de estas cosas:
-
-- permitir que usuarios suban archivos desde la web;
-- guardar historial de conversaciones;
-- manejar multiples usuarios o autenticacion;
-- administrar documentos sin depender del repositorio Git;
-- reindexar contenido dinamico desde produccion.
-
-Para el estado actual del proyecto, mantener `backend/storage/` versionado en Git es mas simple y mas barato que agregar una base de datos.
-
-## Nota importante
-
-La primera vez que se ejecute el backend, el modelo de embeddings puede descargarse automaticamente. Eso requiere conexion a internet en ese momento.
-
-Algunos PDFs protegidos o cifrados requieren la dependencia `cryptography`, que ya esta incluida en `backend/requirements.txt`.
-
-Si el chat muestra un error de conexion o el backend responde que no esta listo, revisa `http://localhost:8000/health`.
-
-## Fuentes consultadas
-
-Documentacion oficial revisada entre el `26 de abril de 2026` y el `28 de abril de 2026`:
-
-- OpenAI API pricing: `https://openai.com/api/pricing/`
-- OpenAI help sobre API: `https://help.openai.com/en/articles/4936851-how-do-i-start-exploring-the-openai-api`
-- OpenAI help sobre ChatGPT Plus: `https://help.openai.com/en/articles/6950777-chatgpt-plus-.eps`
-- Anthropic pricing: `https://docs.anthropic.com/en/docs/about-claude/pricing`
-- Anthropic API getting started: `https://docs.anthropic.com/en/api/getting-started`
-- Anthropic API rate limits: `https://docs.anthropic.com/en/api/rate-limits`
-- Gemini billing: `https://ai.google.dev/gemini-api/docs/billing`
-- Gemini rate limits y free tier: `https://ai.google.dev/gemini-api/docs/quota`
+La idea es que el repo sea la referencia comun cuando trabajes desde otra computadora o desde GitHub.

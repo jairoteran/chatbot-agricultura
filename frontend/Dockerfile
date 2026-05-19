@@ -1,0 +1,36 @@
+FROM node:20-alpine AS build
+
+WORKDIR /app/frontend
+
+ARG VITE_API_URL=/api/chat
+ARG VITE_HEALTH_URL=/api/health
+ARG VITE_REINDEX_URL=/api/reindex
+ARG VITE_SUMMARY_URL=/api/summarize-document
+ARG VITE_ADMIN_CONFIG_URL=/api/admin/config
+ARG VITE_ADMIN_SESSION_URL=/api/admin/session
+ARG VITE_ADMIN_DOCUMENTS_URL=/api/admin/documents
+ARG VITE_ADMIN_BASE_PATH=/gestion
+ARG VITE_BASE_PATH=/
+
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_HEALTH_URL=$VITE_HEALTH_URL
+ENV VITE_REINDEX_URL=$VITE_REINDEX_URL
+ENV VITE_SUMMARY_URL=$VITE_SUMMARY_URL
+ENV VITE_ADMIN_CONFIG_URL=$VITE_ADMIN_CONFIG_URL
+ENV VITE_ADMIN_SESSION_URL=$VITE_ADMIN_SESSION_URL
+ENV VITE_ADMIN_DOCUMENTS_URL=$VITE_ADMIN_DOCUMENTS_URL
+ENV VITE_ADMIN_BASE_PATH=$VITE_ADMIN_BASE_PATH
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine
+
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/frontend/dist /usr/share/nginx/html
+
+EXPOSE 8080
