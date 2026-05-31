@@ -52,6 +52,35 @@ Prefijos sugeridos en Cloud Storage:
   - eliminar PDFs
   - disparar reindexado manual
 
+### Gobernanza documental actual y evolucion recomendada
+
+Estado actual:
+
+- el acceso operativo se controla mediante Google Sign-In y `ADMIN_EMAILS`
+- el sistema funciona con una lista blanca de cuentas autorizadas
+- tecnicamente eso resuelve autenticacion y administracion basica
+
+Evolucion recomendada:
+
+- evitar depender conceptualmente de un unico `administrador`
+- separar el flujo documental en etapas como:
+  - `subido`
+  - `en revision`
+  - `aprobado`
+  - `rechazado`
+  - `indexado`
+- permitir en una fase futura perfiles como:
+  - `colaborador`: sube documentos
+  - `revisor`: valida o rechaza
+  - `curador` o `gestor`: aprueba e incorpora al corpus indexado
+
+Motivo:
+
+- mejora la gobernanza del conocimiento
+- reduce centralizacion operativa
+- representa mejor un flujo academico o comunitario de validacion de saberes
+- fortalece la justificacion metodologica de la tesis
+
 ### Politica de reindexado
 
 - el backend HTTP ya no reindexa automaticamente cuando detecta cambios en los PDFs
@@ -60,6 +89,52 @@ Prefijos sugeridos en Cloud Storage:
   - desde `POST /reindex`
   - o desde el Cloud Run Job batch
 - esto evita que la API web se comporte como un proceso pesado de rebuild durante consultas normales
+
+### Modelo NLP realmente utilizado
+
+El proyecto no usa un unico modelo NLP, sino una arquitectura `RAG` con dos capas principales:
+
+- `Gemini 2.5 Flash`:
+  - genera la respuesta final en lenguaje natural
+  - interpreta la pregunta del usuario
+  - redacta respuestas y resumenes a partir del contexto recuperado
+- `sentence-transformers/all-MiniLM-L6-v2`:
+  - genera embeddings semanticos de los documentos
+  - permite recuperar fragmentos relevantes por similitud
+  - se integra mediante `Hugging Face` y `llama-index`
+
+Interpretacion correcta para tesis o defensa:
+
+- el modelo de generacion principal es `Gemini 2.5 Flash`
+- el modelo de recuperacion semantica principal es `all-MiniLM-L6-v2`
+- por tanto, el sistema usa una arquitectura NLP hibrida, no un solo modelo aislado
+
+### Papel de Hugging Face, spaCy y NLTK
+
+- `Hugging Face`:
+  - ya participa en el proyecto mediante `sentence-transformers`
+  - hoy se usa para embeddings y recuperacion semantica, no como chatbot principal
+- `spaCy`:
+  - no esta integrado todavia
+  - se considera una mejora futura con mas sentido practico que `NLTK`
+  - podria ayudar a extraer entidades, limpiar texto y detectar conceptos utiles antes del ranking o del resumen
+- `NLTK`:
+  - no esta integrado actualmente
+  - podria servir como apoyo para limpieza, stopwords o procesamiento basico
+  - no se considera prioridad mientras `spaCy` o los embeddings actuales cubran mejor el caso de uso
+
+### Corpus documental
+
+En este proyecto, el `corpus` es el conjunto organizado de documentos PDF que alimenta al sistema.
+
+Ese corpus:
+
+- contiene manuales, textos tecnicos, documentos historicos y materiales sobre agricultura y saberes ancestrales
+- se almacena en `Cloud Storage`
+- se registra en `Firestore` mediante metadatos y estado
+- se transforma en un indice consultable mediante el proceso de reindexado
+
+Desde la perspectiva academica, esto permite describir el sistema no solo como un chatbot con PDFs, sino como un asistente construido sobre un corpus documental especializado.
 
 ### Frontend publico
 
@@ -210,6 +285,26 @@ Motivo:
 
 - permite respetar el estilo visual del panel
 - evita romper el flujo real de autenticacion con intentos custom que no abren correctamente el acceso de Google
+
+### Decision 7
+
+El sistema debe describirse como una arquitectura `RAG` basada en corpus, no como un chatbot generativo aislado.
+
+Motivo:
+
+- refleja mejor la realidad tecnica del proyecto
+- aclara que las respuestas dependen de documentos recuperados
+- permite justificar de forma correcta el uso combinado de Gemini y embeddings de Hugging Face
+
+### Decision 8
+
+La evolucion futura de la gestion documental debe priorizar flujo de curacion antes que un rol unico de administrador.
+
+Motivo:
+
+- mejora trazabilidad y validacion de contenidos
+- es mas coherente con un proyecto sobre saberes ancestrales
+- abre camino a estados documentales y revision colaborativa
 
 ## Evolucion prevista
 

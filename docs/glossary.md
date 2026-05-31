@@ -88,3 +88,76 @@ En este proyecto, cuando el indice vive en GCS:
 
 - se descarga a un cache local
 - luego el backend lo usa desde ese directorio runtime
+
+## corpus
+
+Es el conjunto organizado de documentos que alimenta al sistema.
+
+En este proyecto, el corpus esta compuesto por PDFs sobre agricultura, agroecologia y saberes ancestrales.
+
+Su valor practico es que:
+
+- define la base real de conocimiento del asistente
+- permite justificar academicamente de donde sale la informacion
+- separa el sistema de un chatbot generativo libre
+
+## RAG
+
+Significa `Retrieval-Augmented Generation`.
+
+En este proyecto quiere decir que el sistema:
+
+1. recupera fragmentos relevantes del corpus
+2. envia ese contexto al modelo generativo
+3. redacta una respuesta usando la informacion recuperada
+
+## embeddings
+
+Son representaciones numericas del texto que permiten comparar similitud semantica.
+
+En este proyecto:
+
+- se usan para indexar documentos
+- ayudan a recuperar los fragmentos mas relacionados con una pregunta
+- el modelo principal de embeddings es `sentence-transformers/all-MiniLM-L6-v2`
+
+## Gemini
+
+Es el modelo generativo principal del proyecto.
+
+En este caso se usa `Gemini 2.5 Flash` para:
+
+- interpretar preguntas
+- redactar respuestas
+- generar resumenes a partir del contexto recuperado
+
+## Hugging Face
+
+Es el ecosistema usado indirectamente para la capa de embeddings.
+
+En este proyecto aparece mediante:
+
+- `sentence-transformers`
+- `llama-index-embeddings-huggingface`
+
+Su papel actual no es el chatbot final, sino la recuperacion semantica del corpus.
+
+## spaCy
+
+Es una libreria de NLP orientada a produccion.
+
+Todavia no esta integrada en el proyecto, pero se considera una mejora futura util para:
+
+- extraer entidades
+- limpiar texto
+- detectar conceptos o temas con mas precision
+
+## NLTK
+
+Es una libreria clasica de procesamiento de lenguaje natural.
+
+Actualmente no forma parte del sistema, pero podria servir en el futuro para:
+
+- stopwords personalizadas
+- tokenizacion adicional
+- limpieza o normalizacion basica del texto

@@ -18,8 +18,10 @@ En el estado actual del proyecto, los cambios mas relevantes quedaron documentad
 
 - `project-status.md`: estado consolidado del panel admin, reindexado manual y proximos pasos de despliegue
 - `architecture.md`: decisiones de arquitectura sobre panel administrativo, autenticacion Google y politica de reindexado manual
+- `architecture.md`: tambien documenta el modelo NLP real del sistema, el papel de Gemini y Hugging Face, el concepto de corpus y la evolucion recomendada de gobernanza documental
 - `cloud-run-jobs.md`: operacion cloud actual, variables necesarias para admin y uso manual del reindexado
 - `evidence-log.md`: errores importantes encontrados, decisiones tecnicas y correcciones aplicadas durante este bloque
+- `glossary.md`: incluye definiciones practicas de `RAG`, `corpus`, `embeddings`, `Gemini`, `Hugging Face`, `spaCy` y `NLTK`
 
 ## Regla de mantenimiento
 
