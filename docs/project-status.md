@@ -47,17 +47,27 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se elimino el reindexado automatico en runtime y el flujo quedo completamente manual desde el panel de administracion
 - Se agrego una accion manual `Reindexar ahora` en el panel de documentos y se bloquearon acciones concurrentes de subir, borrar y reindexar
 - Se dejo configurado `backend/cloudrun.env.yaml` con `GOOGLE_AUTH_CLIENT_ID` y `ADMIN_EMAILS` para el despliegue cloud actual
+- Se implemento subida de PDFs pesados directa a `Cloud Storage` desde el navegador para evitar el limite de `Cloud Run` en requests grandes
+- Se ajusto el flujo manual de reindexado en cloud para que el panel administrativo dispare `Cloud Run Jobs` en lugar de reconstruir el indice dentro de la API web
+- Se agrego progreso operativo del reindexado en el panel admin, con estado persistido en backend y seguimiento visible desde la UI
+- Se mejoro la redaccion de respuestas y resúmenes para que suenen mas directos y naturales, sin encabezados fijos como `Respuesta breve`, `Puntos clave` o `Conclusion`
+- Se corrigio la extraccion mecanica de keywords que generaba frases poco naturales como listas de nombres sueltos dentro de la respuesta
+- Se simplifico la interfaz publica ocultando contadores internos de documentos y bloques secundarios no necesarios para el usuario final
+- Se limpio el selector de documentos del resumen para mostrar titulos mas legibles sin cambiar el nombre real del archivo usado por el backend
+- Se rediseño la experiencia movil del chat publico con menu lateral desplegable, dejando el chat como vista principal y moviendo herramientas secundarias al drawer movil
 
 ## En progreso
 
 - Transicion desde arquitectura local versionada en Git hacia almacenamiento administrado en Google Cloud
 - Publicacion y validacion final del frontend y backend actualizados en cloud
+- Ajuste fino de experiencia movil y tono conversacional del asistente sobre pruebas reales en localhost y cloud
 
 ## Pendiente inmediato
 
 - Construir y desplegar backend y frontend con la version actual del panel admin
 - Ejecutar validacion extremo a extremo del flujo admin: login, subida, reindex manual, consulta y borrado
 - Verificar el comportamiento del job de reindexado cloud despues del redeploy
+- Validar el nuevo drawer movil en dispositivos reales y ajustar breakpoints si algun telefono o tablet pequena requiere refinamiento
 
 ## Pendiente por fases
 
@@ -126,3 +136,7 @@ Tambien se verifico la publicacion real del indice en el bucket `tesis-producto-
 En el bloque mas reciente la API principal quedo funcionando en Cloud Run con `status: ok`, `deployment_mode: cloud-run`, `index_storage_backend: gcs`, `metadata_backend: firestore` y `process_state_backend: firestore`. El siguiente bloque ya se centra especificamente en sacar los PDFs de `backend/data/` y moverlos a `Cloud Storage` como backend documental real.
 
 En el bloque actual se completo el panel administrativo protegido bajo `/gestion`, con autenticacion por Google, sesiones administradas por backend, carga y borrado manual de documentos, y reindexado manual disparado desde la UI. Tambien se decidio quitar el reindexado automatico en runtime para que el backend web no reconstruya el indice por si solo cuando detecta cambios documentales.
+
+En los bloques posteriores se corrigio el flujo cloud para soportar PDFs grandes mediante subida directa del navegador a `Cloud Storage`, con politica `CORS` del bucket y registro posterior de metadatos. El panel admin quedo conectado a `Cloud Run Jobs` para ejecutar el reindexado real en cloud y mostrar progreso operativo al usuario.
+
+En el bloque mas reciente se ajusto la experiencia del chat publico: se simplificaron elementos laterales visibles, se mejoro el tono del asistente para responder de forma mas directa y confiable, se limpiaron titulos documentales mostrados al usuario y se incorporo un menu lateral desplegable para pantallas moviles, dejando el chat como foco principal.

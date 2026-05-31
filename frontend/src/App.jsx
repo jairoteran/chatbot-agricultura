@@ -248,6 +248,65 @@ function compactLabel(text, maxLength = 72) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
+function prettifyDocumentTitle(title, fileName = "") {
+  const source = String(title || fileName || "")
+    .replace(/\.[^.]+$/, "")
+    .trim();
+
+  if (!source) {
+    return "Documento disponible";
+  }
+
+  const normalized = source
+    .replace(/[_]+/g, " ")
+    .replace(/(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])/g, " ")
+    .replace(/\s*[-–]+\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const withoutNumericPrefix =
+    /^\d{1,3}\s+/u.test(normalized) && !/^\d{4}\b/u.test(normalized)
+      ? normalized.replace(/^\d{1,3}\s+/u, "")
+      : normalized;
+
+  const minorWords = new Set([
+    "a",
+    "al",
+    "de",
+    "del",
+    "e",
+    "el",
+    "en",
+    "la",
+    "las",
+    "lo",
+    "los",
+    "o",
+    "para",
+    "por",
+    "un",
+    "una",
+    "y",
+  ]);
+
+  return withoutNumericPrefix
+    .split(" ")
+    .filter(Boolean)
+    .map((word, index) => {
+      if (/^\d+$/u.test(word) || /^[A-ZÁÉÍÓÚÑ]{2,}$/u.test(word)) {
+        return word;
+      }
+
+      const lowered = word.toLowerCase();
+      if (index > 0 && minorWords.has(lowered)) {
+        return lowered;
+      }
+
+      return lowered.charAt(0).toUpperCase() + lowered.slice(1);
+    })
+    .join(" ");
+}
+
 function backendUiState(status, backendReady) {
   if (status.status === "error") {
     return "error";
@@ -334,13 +393,13 @@ function normalizeIndexedDocuments(status) {
   if (status.indexed_documents?.length) {
     return status.indexed_documents.map((document) => ({
       file_name: document.file_name,
-      display_title: document.display_title || document.file_name,
+      display_title: prettifyDocumentTitle(document.display_title, document.file_name),
     }));
   }
 
   return (status.indexed_files || []).map((fileName) => ({
     file_name: fileName,
-    display_title: fileName,
+    display_title: prettifyDocumentTitle(fileName, fileName),
   }));
 }
 
@@ -370,23 +429,6 @@ function assistantModeLabel(status) {
     return "Respuestas con IA";
   }
   return "Respuestas basadas en documentos";
-}
-
-function shortFileHint(fileName) {
-  const normalized = compactLabel(fileName || "", 36);
-  if (!normalized) {
-    return "Documento disponible";
-  }
-  if (/manual/i.test(normalized)) {
-    return "Manual práctico";
-  }
-  if (/gu[ií]a|tradicional/i.test(normalized)) {
-    return "Guía · Vol. 1";
-  }
-  if (/1999|panorama/i.test(normalized)) {
-    return "1999 · Historia";
-  }
-  return "Documento disponible";
 }
 
 function adminHealthTone(status) {
@@ -522,6 +564,7 @@ function PublicChatApp() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState("");
   const [responseStyle, setResponseStyle] = useState("academico");
   const [backendLoadProgress, setBackendLoadProgress] = useState(
@@ -552,6 +595,37 @@ function PublicChatApp() {
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    function handleResize() {
+      if (window.innerWidth > 900) {
+        setIsMobileSidebarOpen(false);
+      }
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+
+    if (isMobileSidebarOpen) {
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = "";
+      };
+    }
+
+    document.body.style.overflow = "";
+    return undefined;
+  }, [isMobileSidebarOpen]);
 
   useEffect(() => {
     const previousStatus = previousBackendStatusRef.current;
@@ -795,6 +869,7 @@ function PublicChatApp() {
 
   function handleSuggestedQuestion(question) {
     setInput(question);
+    setIsMobileSidebarOpen(false);
     textareaRef.current?.focus();
   }
 
@@ -814,8 +889,6 @@ function PublicChatApp() {
     backendStatus.detail &&
     backendStatus.detail !== backendStageText &&
     backendStatus.detail !== "Servicio listo";
-  const featuredDocuments = indexedDocuments.slice(0, 3);
-  const hiddenDocumentCount = Math.max(0, indexedDocuments.length - featuredDocuments.length);
   const showProgressDetails = currentBackendUiState !== "ok";
 
   return (
@@ -825,7 +898,22 @@ function PublicChatApp() {
       animate="visible"
       variants={shellVariants}
     >
-      <motion.aside className="sidebar" variants={panelVariants}>
+      <motion.aside
+        className={`sidebar ${isMobileSidebarOpen ? "is-open" : ""}`}
+        variants={panelVariants}
+      >
+        <div className="sidebar-mobile-topbar">
+          <span className="status-card-label">Menu</span>
+          <button
+            type="button"
+            className="sidebar-close-button"
+            aria-label="Cerrar menu lateral"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          >
+            ×
+          </button>
+        </div>
+
         <div>
           <h1>Asistente documental</h1>
           <p className="sidebar-copy">
@@ -847,13 +935,67 @@ function PublicChatApp() {
           </div>
 
           <div className="status-highlights">
-            <div className="status-card">
-              <span className="status-card-value">{backendStatus.indexed_file_count}</span>
-              <span className="status-card-caption">Documentos indexados</span>
-            </div>
-            <div className="status-card">
+            <div className="status-card status-card-wide">
               <span className="status-card-value">&lt; 3s</span>
               <span className="status-card-caption">Tiempo de respuesta</span>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <span className="status-card-label">Resumen rapido</span>
+            <div className="sidebar-mobile-summary">
+              <div className="toolbar-field sidebar-mobile-field">
+                <label className="summary-label" htmlFor="response-style-select-mobile">
+                  Estilo
+                </label>
+                <select
+                  id="response-style-select-mobile"
+                  className="summary-select toolbar-select"
+                  value={responseStyle}
+                  onChange={(event) => setResponseStyle(event.target.value)}
+                  disabled={isLoading || isSummarizing}
+                >
+                  {responseStyleOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {indexedDocuments.length > 0 && (
+                <div className="toolbar-field toolbar-field-document sidebar-mobile-field">
+                  <label className="summary-label" htmlFor="document-summary-select-mobile">
+                    Documento
+                  </label>
+                  <select
+                    id="document-summary-select-mobile"
+                    className="summary-select toolbar-select"
+                    value={selectedDocument}
+                    onChange={(event) => setSelectedDocument(event.target.value)}
+                    disabled={!backendReady || isSummarizing}
+                  >
+                    {indexedDocuments.map((document) => (
+                      <option
+                        key={document.file_name}
+                        value={document.file_name}
+                        title={document.display_title || document.file_name}
+                      >
+                        {compactLabel(document.display_title || document.file_name)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                className="secondary-button sidebar-mobile-summary-button"
+                type="button"
+                onClick={handleSummarizeDocument}
+                disabled={!backendReady || !selectedDocument || isSummarizing}
+              >
+                {isSummarizing ? "Resumiendo..." : "Resumir"}
+              </button>
             </div>
           </div>
 
@@ -872,32 +1014,6 @@ function PublicChatApp() {
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="sidebar-section">
-            <span className="status-card-label">Biblioteca</span>
-            {featuredDocuments.length > 0 ? (
-              <div className="document-preview-list">
-                {featuredDocuments.map((document) => (
-                  <div key={document.file_name} className="document-preview-item">
-                    <div className="document-preview-icon">◫</div>
-                    <div className="document-preview-copy">
-                      <p className="document-preview-title">
-                        {compactLabel(document.display_title, 38)}
-                      </p>
-                      <p className="document-preview-hint">
-                        {shortFileHint(document.display_title || document.file_name)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-                {hiddenDocumentCount > 0 && (
-                  <p className="status-meta">+ {hiddenDocumentCount} documentos más</p>
-                )}
-              </div>
-            ) : (
-              <p className="status-meta">Aún no hay documentos visibles.</p>
-            )}
           </div>
 
           {showProgressDetails && (
@@ -930,6 +1046,15 @@ function PublicChatApp() {
         </motion.div>
       </motion.aside>
 
+      {isMobileSidebarOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Cerrar panel lateral"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
       <motion.main className="chat-layout" variants={panelVariants}>
         <section className="chat-window">
           <div className="chat-header">
@@ -937,12 +1062,25 @@ function PublicChatApp() {
               <p className="eyebrow">Conversacion</p>
               <h2>Consulta tus documentos</h2>
             </div>
-            <div className="header-meta">
-              <span>{assistantModeLabel(backendStatus)}</span>
+            <div className="chat-header-actions">
+              <button
+                type="button"
+                className="mobile-sidebar-toggle"
+                aria-label="Abrir menu lateral"
+                aria-expanded={isMobileSidebarOpen}
+                onClick={() => setIsMobileSidebarOpen((currentValue) => !currentValue)}
+              >
+                <span />
+                <span />
+                <span />
+              </button>
+              <div className="header-meta">
+                <span>{assistantModeLabel(backendStatus)}</span>
+              </div>
             </div>
           </div>
 
-          <div className="chat-toolbar">
+          <div className="chat-toolbar chat-toolbar-desktop">
             <div className="toolbar-controls">
               <div className="toolbar-field">
                 <label className="summary-label" htmlFor="response-style-select">

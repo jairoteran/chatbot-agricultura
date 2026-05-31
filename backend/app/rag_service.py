@@ -159,7 +159,9 @@ RESPONSE_STYLE_GUIDANCE = {
             "Redacta como si fuera un apoyo para tesis o informe academico, con tono formal y relaciones claras entre ideas."
         ),
         "llm_instruction": (
-            "Usa un tono academico claro y ordenado. Prioriza precision, sintesis y redaccion apta para tesis o trabajos formales."
+            "Usa un tono academico claro y ordenado, pero responde de forma directa y segura. "
+            "No repitas frases como 'segun el documento' o 'los documentos indican' dentro de cada idea. "
+            "Deja que el respaldo documental viva en las fuentes del panel, no en el cuerpo de la respuesta."
         ),
     },
     "simple": {
@@ -171,7 +173,9 @@ RESPONSE_STYLE_GUIDANCE = {
             "Explica como si hablaras con alguien que no conoce el tema. Prioriza claridad, ejemplos breves y lenguaje cotidiano."
         ),
         "llm_instruction": (
-            "Usa un tono sencillo y cercano. Explica con palabras faciles, evita tecnicismos innecesarios y busca que cualquier persona lo entienda."
+            "Usa un tono sencillo, cercano y personalizado, como una conversacion de tu a tu. "
+            "Responde con seguridad y naturalidad. Evita expresiones como 'el documento dice', "
+            "'en base al documento' o 'la evidencia indica' dentro del cuerpo de la respuesta."
         ),
     },
     "tecnico": {
@@ -183,7 +187,8 @@ RESPONSE_STYLE_GUIDANCE = {
             "Resume con enfoque tecnico, resaltando procedimiento, condiciones, criterios y relaciones operativas."
         ),
         "llm_instruction": (
-            "Usa un tono tecnico y preciso. Conserva la terminologia relevante del dominio y enfatiza procedimientos, criterios y relaciones causales."
+            "Usa un tono tecnico y preciso, pero redacta de manera directa. "
+            "No desplaces la atencion al documento ni repitas frases como 'la evidencia recuperada' dentro de cada punto."
         ),
     },
 }
@@ -900,9 +905,9 @@ class RAGService:
             f"Resume el documento '{selected_chunks[0]['file_name']}' de forma organizada.\n"
             "Debes escribir en espanol, sin copiar el texto literalmente.\n"
             f"{style_config['summary_instruction']}\n"
-            "Organiza la respuesta con estas secciones cuando aporten claridad: **Resumen**, **Ideas clave**, **Conclusion**.\n"
-            "Usa listas con guiones para las ideas clave.\n"
-            "Si puedes, menciona de forma breve las paginas mas utiles al final bajo **Referencias**.\n"
+            "Responde con un resumen fluido, natural y facil de seguir, sin encabezados como Resumen, Puntos clave o Conclusion.\n"
+            "Usa listas con guiones solo cuando realmente aporten claridad.\n"
+            "Si puedes, incorpora de forma natural las partes mas utiles del documento sin cerrar con una seccion de referencias.\n"
         )
         answer = self._compose_answer(
             prompt,
@@ -1234,7 +1239,7 @@ class RAGService:
                 snippet = self._fallback_snippet(text)
                 if not snippet:
                     continue
-                fallback_points.append(f"- {snippet} [{self._source_reference(file_name, page_label, score)}]")
+                fallback_points.append(f"- {snippet}")
 
             if not fallback_points:
                 return (
@@ -1243,33 +1248,29 @@ class RAGService:
                 )
 
             return (
-                f"{style_config['sections'][0]} Encontre informacion relacionada, pero el contenido recuperado es parcial.\n\n"
-                f"{style_config['fallback_points_label']}\n"
+                "Encontre informacion relacionada, pero todavia no me alcanza para responder con la claridad que me gustaria.\n\n"
                 + "\n".join(fallback_points)
-                + f"\n\n{style_config['sections'][3]} Si quieres, puedo afinar la busqueda con una pregunta mas especifica."
+                + "\n\nSi quieres, puedo afinar la busqueda con una pregunta mas especifica."
             )
 
         overview = self._build_overview(question, insights, keywords, response_style)
         topic_line = self._build_topic_line(insights, keywords)
         conclusion = self._build_conclusion(question, insights, keywords, response_style)
-        answer_lines = [style_config["sections"][0], overview, "", style_config["sections"][1]]
+        answer_lines = [overview]
 
         for insight in insights[:3]:
-            answer_lines.append(
-                f"- {self._format_insight_summary(insight['summary'], response_style)} "
-                f"[{self._source_reference(insight['file_name'], insight['page_label'], insight['score'])}]"
-            )
+            answer_lines.append(f"- {self._format_insight_summary(insight['summary'], response_style)}")
 
         if topic_line:
-            answer_lines.extend(["", f"{style_config['related_label']} {topic_line}"])
+            answer_lines.extend(["", f"Tambien se relaciona con {topic_line}."])
 
         if conclusion:
-            answer_lines.extend(["", f"{style_config['sections'][2]} {conclusion}"])
+            answer_lines.extend(["", conclusion])
 
         answer_lines.extend(
             [
                 "",
-                f"{style_config['sections'][3]} La respuesta esta sintetizada a partir de los fragmentos recuperados, no copiada de forma literal.",
+                "Si quieres, tambien puedo profundizar en algun punto o darte una explicacion mas breve.",
             ]
         )
         return "\n".join(answer_lines)
@@ -1297,10 +1298,11 @@ class RAGService:
             "Evidencia recuperada:\n"
             f"{evidence_text}\n\n"
             "Instrucciones de salida:\n"
-            "1. Responde de forma directa.\n"
-            f"2. Usa estas secciones solo si aportan claridad: {style_config['sections'][0]}, {style_config['sections'][1]}, {style_config['sections'][2]}.\n"
+            "1. Responde de forma directa, natural y segura, como una conversacion uno a uno.\n"
+            "2. No uses encabezados como Respuesta breve, Puntos clave, Conclusion, Resumen o similares.\n"
             "3. Usa listas con guiones solo cuando realmente ayuden.\n"
-            f"4. Si hay limites o ambiguedades, cierralos bajo {style_config['sections'][3]}.\n"
+            "4. Si hay limites o ambiguedades, explicalos con naturalidad dentro de la respuesta.\n"
+            "5. No menciones de forma repetitiva que respondes en base a documentos. Las fuentes ya se mostraran aparte.\n"
         )
 
         try:
@@ -1452,7 +1454,7 @@ class RAGService:
         fragment = self._clause_to_fragment(clause, preserve_case=False)
         if not fragment:
             return ""
-        return f"Los documentos indican que {fragment}."
+        return self._ensure_sentence(fragment[:1].upper() + fragment[1:])
 
     def _clause_to_fragment(self, clause: str, preserve_case: bool) -> str:
         fragment = self._clean_sentence(clause)
@@ -1483,45 +1485,38 @@ class RAGService:
         response_style: str,
     ) -> str:
         question_style = self._question_style(question)
-        primary_topics = self._collect_topics(insights, keywords)
-        topic_text = ", ".join(primary_topics[:3])
 
         if response_style == "simple":
             if question_style == "como":
-                base = "Segun los fragmentos mas utiles, asi se entiende o se aplica el tema que preguntaste"
+                base = "Asi se entiende o se aplica el tema que preguntaste"
             elif question_style == "por_que":
-                base = "Los textos ayudan a entender por que ocurre o por que se recomienda ese tema"
+                base = "Esto ayuda a entender por que ocurre o por que se recomienda ese tema"
             elif question_style == "cuales":
-                base = "Los documentos muestran varios puntos concretos relacionados con tu pregunta"
+                base = "Hay varios puntos concretos relacionados con tu pregunta"
             else:
-                base = "Con lo que aparece en los documentos, esto es lo mas importante para responderte"
+                base = "Esto es lo mas importante para responderte"
         elif response_style == "tecnico":
             if question_style == "como":
-                base = "La evidencia recuperada describe el procedimiento o la aplicacion operativa del tema consultado"
+                base = "El procedimiento o la aplicacion operativa del tema consultado se puede resumir asi"
             elif question_style == "por_que":
-                base = "La evidencia disponible permite identificar los factores o fundamentos tecnicos asociados al tema consultado"
+                base = "Los factores o fundamentos tecnicos asociados al tema consultado se pueden resumir asi"
             elif question_style == "cuales":
-                base = "Los fragmentos recuperados permiten discriminar componentes, criterios o elementos tecnicos vinculados con la consulta"
+                base = "Los componentes, criterios o elementos tecnicos vinculados con la consulta son estos"
             else:
-                base = "La respuesta puede sintetizarse a partir de la evidencia recuperada con enfoque tecnico"
+                base = "La respuesta puede sintetizarse asi, con enfoque tecnico"
         elif question_style == "como":
-            base = "Al revisar los fragmentos mas relevantes, se describe principalmente como ocurre o se aplica el tema consultado"
+            base = "Asi ocurre o se aplica principalmente el tema consultado"
         elif question_style == "por_que":
-            base = "Los textos recuperados apuntan sobre todo a las causas o razones asociadas al tema consultado"
+            base = "Las causas o razones principales asociadas al tema consultado son estas"
         elif question_style == "cuales":
-            base = "Los documentos permiten identificar varios elementos concretos relacionados con tu pregunta"
+            base = "Se pueden identificar varios elementos concretos relacionados con tu pregunta"
         else:
-            base = "A partir de los fragmentos recuperados, se puede responder de forma sintetizada"
+            base = "Se puede responder de forma sintetizada asi"
 
-        if topic_text:
-            return f"{base}. Los temas que mas sostienen la respuesta son {topic_text}."
         return f"{base}."
 
     def _build_topic_line(self, insights: list[dict], keywords: set[str]) -> str:
-        topics = self._collect_topics(insights, keywords)
-        if not topics:
-            return ""
-        return ", ".join(topics[:5]) + "."
+        return ""
 
     def _style_config(self, response_style: str) -> dict:
         return RESPONSE_STYLE_GUIDANCE.get(response_style, RESPONSE_STYLE_GUIDANCE["academico"])
@@ -1540,12 +1535,14 @@ class RAGService:
 
         if response_style == "tecnico":
             cleaned = re.sub(r"^Los documentos indican que\s+", "", cleaned, flags=re.IGNORECASE)
-            if not re.match(r"^(Se identifica|Se observa|Se registra|El manejo|La evidencia)", cleaned):
-                cleaned = f"Se identifica que {self._lowercase_first(cleaned)}"
+            if not re.match(r"^(Se identifica|Se observa|Se registra|El manejo|La produccion|La dinamica|El proceso)", cleaned):
+                cleaned = f"Se observa que {self._lowercase_first(cleaned)}"
             return self._ensure_sentence(cleaned)
 
-        if not re.match(r"^(La evidencia|Los documentos|Se observa|Se identifica)", cleaned):
-            cleaned = f"La evidencia sugiere que {self._lowercase_first(cleaned)}"
+        cleaned = re.sub(r"^Los documentos indican que\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^La evidencia sugiere que\s+", "", cleaned, flags=re.IGNORECASE)
+        if not re.match(r"^(Se observa|Se identifica|En la practica|En Tungurahua|La produccion|El cultivo|La actividad)", cleaned):
+            cleaned = cleaned[:1].upper() + cleaned[1:]
         return self._ensure_sentence(cleaned)
 
     def _select_summary_chunks(self, chunks: list[dict]) -> list[dict]:
@@ -1584,31 +1581,15 @@ class RAGService:
         if not insights:
             return ""
 
-        dominant_topics = self._collect_topics(insights, keywords)
         top_summary = insights[0]["summary"]
         styled_top_summary = self._format_insight_summary(top_summary, response_style)
 
         if response_style == "simple":
-            if dominant_topics:
-                return (
-                    f"En pocas palabras, para entender este tema conviene fijarse sobre todo en {', '.join(dominant_topics[:3])}. "
-                    f"{styled_top_summary}"
-                )
             return styled_top_summary
 
         if response_style == "tecnico":
-            if dominant_topics:
-                return (
-                    f"En terminos tecnicos, la interpretacion del tema depende principalmente de {', '.join(dominant_topics[:3])}. "
-                    f"{styled_top_summary}"
-                )
             return styled_top_summary
 
-        if dominant_topics:
-            return (
-                f"En conjunto, la evidencia sugiere que el tema se entiende mejor si se consideran especialmente {', '.join(dominant_topics[:3])}, "
-                f"y que {self._lowercase_first(styled_top_summary)}"
-            )
         return styled_top_summary
 
     def _collect_topics(self, insights: list[dict], keywords: set[str]) -> list[str]:

@@ -81,6 +81,32 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: eso dejaba una contradiccion en cloud: la UI ofrecia `Reindexar ahora`, pero el backend podia rechazarlo justo en el despliegue donde el reindex automatico ya estaba desactivado.
 - Evidencia: el backend fue corregido para permitir rebuild forzado cuando el reindex se dispara manualmente, manteniendo deshabilitado solo el rebuild automatico en runtime.
 
+## 2026-05-30 - Subida directa de PDFs pesados a Cloud Storage
+
+- Contexto: el panel admin ya no podia depender de requests web tradicionales porque `Cloud Run` impone limites de tamano y varios documentos reales superaban 30 MB.
+- Evidencia: se rediseño el flujo de carga para pedir una sesion de subida desde backend y transferir el archivo directamente desde el navegador a `Cloud Storage`, dejando la API solo para autorizar y registrar metadatos.
+- Evidencia: durante la primera validacion aparecio un error `No 'Access-Control-Allow-Origin' header is present`, que obligo a configurar `CORS` en el bucket documental y a propagar correctamente el header `Origin` al crear la sesion resumable.
+
+## 2026-05-30 - Reindexado manual real mediante Cloud Run Jobs
+
+- Contexto: el objetivo era que el boton `Reindexar ahora` del panel admin fuera manual, funcional y coherente con la arquitectura cloud.
+- Evidencia: el flujo se ajusto para que la API lance el job `tesis-producto-reindex` en `Cloud Run Jobs` y marque primero un estado `queued` visible desde el panel.
+- Evidencia: aparecio el error `Permission 'run.jobs.run' denied`, lo que obligo a conceder `roles/run.jobsExecutor` a la service account de la API para poder disparar el job desde backend.
+- Evidencia: el panel admin quedo mostrando progreso real del reindexado, primero por estado de cola y luego por avance operativo persistido en backend.
+
+## 2026-05-30 - Limpieza de tono y estructura de respuestas del asistente
+
+- Contexto: se detecto que las respuestas sonaban demasiado documentales o mecanicas, con frases como `Respuesta breve`, `Puntos clave` y listas artificiales de palabras relevantes.
+- Evidencia: `backend/app/rag_service.py` fue ajustado para responder de forma mas directa, natural y segura, dejando las fuentes en un panel aparte en lugar de repetir dentro del texto `segun el documento` o frases similares.
+- Evidencia: se eliminaron encabezados forzados en respuestas y resúmenes, y tambien se quito la inyeccion de keywords mecanicas que generaba salidas poco naturales como `luis, hacer, guerrero`.
+
+## 2026-05-30 - Simplificacion de la interfaz publica y experiencia movil
+
+- Contexto: la interfaz publica seguia mostrando elementos secundarios que quitaban espacio al chat, especialmente en celulares.
+- Evidencia: se ocultaron contadores internos de documentos, bloques secundarios como la biblioteca lateral y se limpiaron titulos feos del selector de resumen para mostrar nombres mas legibles.
+- Evidencia: en movil se rediseño el sidebar como un drawer desplegable, dejando el chat como pantalla principal y moviendo al menu lateral las herramientas de resumen y preguntas frecuentes.
+- Evidencia: en la primera iteracion el panel lateral quedo abierto permanentemente por un choque entre `motion` y `transform` en CSS; la correccion final cambio ese comportamiento a una apertura controlada por posicion lateral para que el drawer arranque realmente cerrado.
+
 ### Resultado
 
 - correcto
