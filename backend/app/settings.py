@@ -48,6 +48,16 @@ def _env_csv(name: str) -> tuple[str, ...]:
     )
 
 
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class AppSettings:
     root_dir: Path
@@ -72,8 +82,11 @@ class AppSettings:
     firestore_jobs_collection: str
     firestore_runtime_collection: str
     gemini_model: str
+    gemini_fallback_model: str
+    llm_timeout_seconds: float
     openai_model: str
     allow_runtime_reindex: bool
+    enable_vector_retrieval: bool
     google_auth_client_id: str
     admin_emails: tuple[str, ...]
     admin_session_secret: str
@@ -141,8 +154,11 @@ def get_settings() -> AppSettings:
         firestore_jobs_collection=os.getenv("FIRESTORE_JOBS_COLLECTION", "reindex_jobs").strip() or "reindex_jobs",
         firestore_runtime_collection=os.getenv("FIRESTORE_RUNTIME_COLLECTION", "runtime_state").strip() or "runtime_state",
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
+        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash",
+        llm_timeout_seconds=max(0.5, _env_float("LLM_TIMEOUT_SECONDS", 2.2)),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini",
         allow_runtime_reindex=allow_runtime_reindex,
+        enable_vector_retrieval=_env_flag("ENABLE_VECTOR_RETRIEVAL", default=True),
         google_auth_client_id=os.getenv("GOOGLE_AUTH_CLIENT_ID", "").strip(),
         admin_emails=_env_csv("ADMIN_EMAILS"),
         admin_session_secret=os.getenv("ADMIN_SESSION_SECRET", "").strip(),

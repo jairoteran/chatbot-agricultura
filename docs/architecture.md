@@ -40,14 +40,14 @@ Prefijos sugeridos en Cloud Storage:
 
 ## Responsabilidad por servicio
 
-### Panel administrativo
+### Panel de gestion documental
 
 - vive dentro del frontend en la ruta `/gestion`
 - usa Google Sign-In para autenticar cuentas concretas
-- el backend valida el `credential` de Google y entrega una sesion administrativa propia
-- el acceso queda restringido por `ADMIN_EMAILS`
+- el backend valida el `credential` de Google y entrega una sesion de gestion documental propia
+- el acceso queda restringido a cuentas autorizadas mediante `ADMIN_EMAILS`
 - desde esta vista se permite:
-  - listar documentos administrables
+  - listar documentos del corpus
   - subir PDFs manualmente
   - eliminar PDFs
   - disparar reindexado manual
@@ -58,11 +58,12 @@ Estado actual:
 
 - el acceso operativo se controla mediante Google Sign-In y `ADMIN_EMAILS`
 - el sistema funciona con una lista blanca de cuentas autorizadas
-- tecnicamente eso resuelve autenticacion y administracion basica
+- no se presenta como una jerarquia de roles, sino como acceso autorizado a la gestion del corpus
+- tecnicamente eso resuelve autenticacion y operacion documental basica
 
 Evolucion recomendada:
 
-- evitar depender conceptualmente de un unico `administrador`
+- evitar depender conceptualmente de un unico `administrador` o de roles rigidos
 - separar el flujo documental en etapas como:
   - `subido`
   - `en revision`
@@ -73,6 +74,7 @@ Evolucion recomendada:
   - `colaborador`: sube documentos
   - `revisor`: valida o rechaza
   - `curador` o `gestor`: aprueba e incorpora al corpus indexado
+- si se implementan permisos futuros, priorizar permisos por accion antes que etiquetas rigidas de rol
 
 Motivo:
 
@@ -115,13 +117,13 @@ Interpretacion correcta para tesis o defensa:
   - ya participa en el proyecto mediante `sentence-transformers`
   - hoy se usa para embeddings y recuperacion semantica, no como chatbot principal
 - `spaCy`:
-  - no esta integrado todavia
-  - se considera una mejora futura con mas sentido practico que `NLTK`
-  - podria ayudar a extraer entidades, limpiar texto y detectar conceptos utiles antes del ranking o del resumen
+  - queda integrado como capa de enriquecimiento del corpus durante el reindexado
+  - extrae temas, entidades y terminos clave para registrar metadatos documentales
+  - si no existe un modelo entrenado de espanol instalado, el sistema usa un fallback ligero con vocabulario de dominio para no romper local ni cloud
 - `NLTK`:
   - no esta integrado actualmente
-  - podria servir como apoyo para limpieza, stopwords o procesamiento basico
-  - no se considera prioridad mientras `spaCy` o los embeddings actuales cubran mejor el caso de uso
+  - se mantiene fuera del runtime porque la limpieza/tokenizacion actual ya queda cubierta por spaCy, reglas propias y el pipeline RAG
+  - podria evaluarse despues solo si se necesita un recurso puntual de tokenizacion, stopwords o validacion linguistica
 
 ### Corpus documental
 
@@ -133,6 +135,8 @@ Ese corpus:
 - se almacena en `Cloud Storage`
 - se registra en `Firestore` mediante metadatos y estado
 - se transforma en un indice consultable mediante el proceso de reindexado
+- registra estados documentales como `pending_index`, `indexed`, `deleted` y `failed`
+- puede guardar temas, entidades y terminos clave extraidos con `spaCy` o con el fallback de dominio
 
 Desde la perspectiva academica, esto permite describir el sistema no solo como un chatbot con PDFs, sino como un asistente construido sobre un corpus documental especializado.
 
@@ -154,7 +158,7 @@ Opcion operativa alternativa:
 ### Cloud Run
 
 - Exponer la API HTTP principal
-- Atender `chat`, `health` y futuras operaciones de administracion
+- Atender `chat`, `health` y futuras operaciones de gestion documental
 - Leer configuracion desde Secret Manager
 - Consultar Firestore para estado y metadatos
 - Leer el indice publicado en almacenamiento duradero
@@ -187,6 +191,7 @@ Opcion operativa alternativa:
 
 - Guardar claves como `GEMINI_API_KEY` y `OPENAI_API_KEY`
 - Guardar configuraciones sensibles del backend
+- `GEMINI_FALLBACK_MODEL` no es secreto, pero permite definir un segundo modelo Gemini para contingencias de alta demanda
 
 ## Variables de entorno base
 
@@ -208,6 +213,10 @@ Variables ya previstas en el backend:
 - `FIRESTORE_JOBS_COLLECTION`
 - `FIRESTORE_RUNTIME_COLLECTION`
 - `ALLOW_RUNTIME_REINDEX`
+- `ENABLE_VECTOR_RETRIEVAL`
+- `GEMINI_MODEL`
+- `GEMINI_FALLBACK_MODEL`
+- `LLM_TIMEOUT_SECONDS`
 - `GOOGLE_AUTH_CLIENT_ID`
 - `ADMIN_EMAILS`
 - `ADMIN_BASE_PATH`
@@ -219,7 +228,7 @@ Variables ya previstas en el backend:
 2. El PDF se guarda en Cloud Storage.
 3. Se crea o actualiza un registro de documento en Firestore.
 4. El sistema queda marcado como pendiente de reindexado.
-5. Un administrador ejecuta manualmente el reindexado desde el panel o mediante Cloud Run Job.
+5. Una cuenta autorizada ejecuta manualmente el reindexado desde el panel de gestion documental o mediante Cloud Run Job.
 6. El job o endpoint manual lee los PDFs requeridos y genera el indice.
 7. El job o endpoint manual publica el nuevo indice en Cloud Storage.
 8. El proceso actualiza en Firestore el resultado del reindexado.
@@ -269,7 +278,7 @@ Motivo:
 
 ### Decision 5
 
-El reindexado del entorno desplegado debe ser manual y controlado desde administracion.
+El reindexado del entorno desplegado debe ser manual y controlado desde gestion documental.
 
 Motivo:
 
@@ -277,9 +286,15 @@ Motivo:
 - hace mas predecible el estado del indice
 - separa claramente consultas publicas de operaciones operativas
 
+Nota operativa:
+
+- `ALLOW_RUNTIME_REINDEX=false` evita reconstrucciones dentro de la API web
+- `ENABLE_VECTOR_RETRIEVAL=true` permite que la API cargue el indice vectorial publicado y responda de forma mas parecida al entorno local
+- estas dos decisiones deben mantenerse separadas para no degradar cloud a `lexical-only`
+
 ### Decision 6
 
-La UI del login admin puede usar una capa visual propia, pero el click real debe seguir pasando por Google Identity Services.
+La UI del acceso de gestion documental puede usar una capa visual propia, pero el click real debe seguir pasando por Google Identity Services.
 
 Motivo:
 
@@ -305,6 +320,17 @@ Motivo:
 - mejora trazabilidad y validacion de contenidos
 - es mas coherente con un proyecto sobre saberes ancestrales
 - abre camino a estados documentales y revision colaborativa
+
+### Decision 9
+
+La interfaz visible debe hablar de `gestion documental` y `cuentas autorizadas`, no de un rol central de administrador.
+
+Motivo:
+
+- alinea el producto con la recomendacion metodologica de evitar roles rigidos
+- mantiene el control operativo necesario para proteger el corpus
+- permite explicar el sistema como gobernanza documental basada en acceso autorizado
+- deja los nombres tecnicos internos como `admin` solo por compatibilidad de endpoints y configuracion existente
 
 ## Evolucion prevista
 

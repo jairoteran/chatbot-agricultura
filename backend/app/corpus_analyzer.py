@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from collections import Counter
+from functools import lru_cache
+
+
+SPANISH_STOP_WORDS = {
+    "ademas", "algo", "algunos", "ante", "aunque", "cada", "como", "con", "contra",
+    "cuando", "desde", "donde", "durante", "entre", "esta", "estas", "este", "estos",
+    "hacia", "hasta", "para", "pero", "porque", "puede", "pueden", "segun", "sobre",
+    "tambien", "tener", "tiene", "tienen", "todo", "todos", "tras", "unas", "unos",
+    "agricultura", "documento", "documentos", "informacion", "sistema", "sistemas",
+}
+
+DOMAIN_TERMS = {
+    "agroecologia", "agroecologico", "agricultura familiar", "agricultura organica",
+    "agricultura tradicional", "saberes ancestrales", "conocimiento ancestral",
+    "seguridad alimentaria", "soberania alimentaria", "cultivo", "cultivos", "suelo",
+    "riego", "semilla", "semillas", "papa", "maiz", "quinua", "chocho", "amaranto",
+    "camellones", "chakra", "chacra", "fertilizantes", "plagas", "enfermedades",
+    "biodiversidad", "cambio climatico", "produccion agricola", "agricultura sostenible",
+}
+
+LOCATION_TERMS = {
+    "ecuador", "tungurahua", "cotacachi", "cuenca", "san joaquin", "sierra norte",
+    "galapagos", "costa", "sierra", "amazonia", "andes", "chimborazo", "cotopaxi",
+    "pichincha", "imbabura", "loja", "azuay", "guayas", "manabi",
+}
+
+
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.lower())
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def _clean_text(text: str) -> str:
+    cleaned = unicodedata.normalize("NFKC", str(text or ""))
+    cleaned = cleaned.replace("\u00ad", "")
+    cleaned = re.sub(r"(?<=[A-Za-zÁÉÍÓÚÜÑáéíóúüñ])-\s+(?=[a-záéíóúüñ])", "", cleaned)
+    cleaned = re.sub(r"\b[a-záéíóúüñ]{2,6}-\s*\d{1,4}\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+@lru_cache(maxsize=1)
+def _load_spacy_model():
+    try:
+        import spacy
+    except Exception:
+        return None
+
+    for model_name in ("es_core_news_sm", "es_core_news_md"):
+        try:
+            return spacy.load(model_name)
+        except Exception:
+            continue
+
+    try:
+        nlp = spacy.blank("es")
+        if "sentencizer" not in nlp.pipe_names:
+            nlp.add_pipe("sentencizer")
+        return nlp
+    except Exception:
+        return None
+
+
+def _top_domain_terms(normalized_text: str) -> list[str]:
+    found = [term for term in DOMAIN_TERMS if term in normalized_text]
+    return sorted(found, key=lambda term: (-len(term.split()), term))[:12]
+
+
+def _top_location_terms(normalized_text: str) -> list[str]:
+    return sorted(term for term in LOCATION_TERMS if term in normalized_text)[:10]
+
+
+def _keyword_terms(cleaned_text: str) -> list[str]:
+    normalized_text = _normalize_text(cleaned_text)
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]{4,}", normalized_text)
+        if token not in SPANISH_STOP_WORDS
+    ]
+    counts = Counter(tokens)
+    return [term for term, _ in counts.most_common(14)]
+
+
+def analyze_corpus_document(file_name: str, chunks: list[str]) -> dict:
+    text = _clean_text(" ".join(chunks))[:18000]
+    normalized_text = _normalize_text(text)
+    topics = _top_domain_terms(normalized_text)
+    entities = _top_location_terms(normalized_text)
+    key_terms = _keyword_terms(text)
+    analyzer = "fallback"
+
+    nlp = _load_spacy_model()
+    if nlp is not None and text:
+        try:
+            doc = nlp(text[: nlp.max_length - 1])
+            analyzer = "spacy"
+            if getattr(doc, "ents", None):
+                entity_counts = Counter(
+                    ent.text.strip()
+                    for ent in doc.ents
+                    if ent.text.strip() and len(ent.text.strip()) >= 3
+                )
+                entities = [item for item, _ in entity_counts.most_common(12)] or entities
+
+            noun_chunks = getattr(doc, "noun_chunks", None)
+            if noun_chunks is not None:
+                chunk_counts = Counter()
+                for chunk in noun_chunks:
+                    value = _normalize_text(chunk.text).strip()
+                    if len(value) >= 4 and value not in SPANISH_STOP_WORDS:
+                        chunk_counts[value] += 1
+                topics = [item for item, _ in chunk_counts.most_common(12)] or topics
+        except Exception:
+            analyzer = "fallback"
+
+    if not topics:
+        topics = key_terms[:8]
+
+    return {
+        "file_name": file_name,
+        "topics": topics[:12],
+        "entities": entities[:12],
+        "key_terms": key_terms[:14],
+        "nlp_analyzer": analyzer,
+    }

@@ -122,12 +122,14 @@ Script auxiliar del repo:
 
 El script despliega la API con `1Gi` de memoria por defecto, porque `512Mi` resulto insuficiente durante la inicializacion real del servicio en Cloud Run.
 Ademas, el script fuerza `ALLOW_RUNTIME_REINDEX=false` para la API cloud, de modo que el servicio web no intente reindexar ni cargar el backend pesado de embeddings en vivo como si fuera el job batch.
+El retrieval vectorial de la API se controla aparte con `ENABLE_VECTOR_RETRIEVAL=true`; esa variable permite cargar el indice vectorial publicado sin permitir rebuilds dentro del servicio web.
 
-Con el bloque administrativo actual tambien debes asegurar:
+Con el bloque de gestion documental actual tambien debes asegurar:
 
 - `GOOGLE_AUTH_CLIENT_ID` configurado en `backend/cloudrun.env.yaml` o pasado al script
 - `ADMIN_EMAILS` con la lista de correos autorizados
-- `ADMIN_SESSION_SECRET` disponible desde Secret Manager si vas a usar login admin en cloud
+- `ADMIN_SESSION_SECRET` disponible desde Secret Manager si vas a usar acceso protegido en cloud
+- `ENABLE_VECTOR_RETRIEVAL=true` si quieres que cloud recupere fragmentos con el indice vectorial igual que local
 
 Si ya tienes un secreto creado en Secret Manager para Gemini:
 
@@ -179,13 +181,13 @@ Si quieres crear o actualizar el job y ejecutarlo enseguida:
 .\scripts\deploy-reindex-job.ps1 -ExecuteNow
 ```
 
-## Operacion manual desde el panel admin
+## Operacion manual desde el panel de gestion documental
 
 Con la version actual del proyecto:
 
 - subir o eliminar PDFs desde `/gestion` ya no dispara reindexado automatico
 - el backend marca el indice como pendiente cuando detecta cambios
-- el administrador debe ejecutar manualmente `Reindexar ahora` desde el panel
+- una cuenta autorizada debe ejecutar manualmente `Reindexar ahora` desde el panel
 - como alternativa operativa, tambien puede ejecutarse el Cloud Run Job `tesis-producto-reindex`
 
 Esto deja el flujo cloud alineado con la decision de no reconstruir el indice durante trafico normal de la API web.

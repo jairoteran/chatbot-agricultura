@@ -5,18 +5,32 @@ from uuid import uuid4
 
 from app.cloud_layout import CloudLayout
 from app.index_models import ActiveIndexPointer, IndexManifest
-from app.metadata_models import DocumentRecord, ReindexJobRecord, RuntimeStateRecord, utc_now_iso
+from app.metadata_models import (
+    DOCUMENT_STATUS_INDEXED,
+    DocumentRecord,
+    ReindexJobRecord,
+    RuntimeStateRecord,
+    utc_now_iso,
+)
 from app.settings import AppSettings
 
 
 class MetadataRepository(Protocol):
-    def sync_documents(self, manifest: IndexManifest, documents_prefix: str) -> None:
+    def sync_documents(
+        self,
+        manifest: IndexManifest,
+        documents_prefix: str,
+        corpus_analysis: dict[str, dict] | None = None,
+    ) -> None:
         ...
 
     def upsert_document_record(self, record: DocumentRecord) -> None:
         ...
 
     def delete_document_record(self, relative_path: str) -> None:
+        ...
+
+    def list_document_records(self) -> list[DocumentRecord]:
         ...
 
     def start_reindex_job(self, trigger: str, source: str, *, total_documents: int = 0) -> str:
@@ -67,7 +81,12 @@ class NoopMetadataRepository:
         self.settings = settings
         self.runtime_state = RuntimeStateRecord()
 
-    def sync_documents(self, manifest: IndexManifest, documents_prefix: str) -> None:
+    def sync_documents(
+        self,
+        manifest: IndexManifest,
+        documents_prefix: str,
+        corpus_analysis: dict[str, dict] | None = None,
+    ) -> None:
         return None
 
     def upsert_document_record(self, record: DocumentRecord) -> None:
@@ -75,6 +94,9 @@ class NoopMetadataRepository:
 
     def delete_document_record(self, relative_path: str) -> None:
         return None
+
+    def list_document_records(self) -> list[DocumentRecord]:
+        return []
 
     def start_reindex_job(self, trigger: str, source: str, *, total_documents: int = 0) -> str:
         return f"noop-{uuid4().hex[:12]}"
@@ -207,10 +229,17 @@ class FirestoreMetadataRepository:
         self.settings = settings
         self.cloud_layout = cloud_layout
 
-    def sync_documents(self, manifest: IndexManifest, documents_prefix: str) -> None:
+    def sync_documents(
+        self,
+        manifest: IndexManifest,
+        documents_prefix: str,
+        corpus_analysis: dict[str, dict] | None = None,
+    ) -> None:
         documents = self._documents_collection()
+        analysis_by_path = corpus_analysis or {}
         for item in manifest.files:
             storage_path = self.cloud_layout.document_blob_path(item.relative_path)
+            analysis = analysis_by_path.get(item.relative_path, {})
             record = DocumentRecord(
                 document_id=item.fingerprint[:24] or item.relative_path.replace("/", "_"),
                 file_name=item.file_name,
@@ -218,7 +247,11 @@ class FirestoreMetadataRepository:
                 storage_path=storage_path if self.settings.uses_cloud_documents else f"local:{item.relative_path}",
                 fingerprint=item.fingerprint,
                 size=item.size,
-                status="indexed",
+                status=DOCUMENT_STATUS_INDEXED,
+                topics=analysis.get("topics", []),
+                entities=analysis.get("entities", []),
+                key_terms=analysis.get("key_terms", []),
+                nlp_analyzer=analysis.get("nlp_analyzer", ""),
             )
             documents.document(record.document_id).set(record.to_dict(), merge=True)
 
@@ -229,6 +262,13 @@ class FirestoreMetadataRepository:
         documents = self._documents_collection()
         for snapshot in documents.where("relative_path", "==", relative_path).stream():
             snapshot.reference.delete()
+
+    def list_document_records(self) -> list[DocumentRecord]:
+        records: list[DocumentRecord] = []
+        for snapshot in self._documents_collection().stream():
+            payload = snapshot.to_dict() or {}
+            records.append(DocumentRecord.from_dict(payload))
+        return sorted(records, key=lambda item: item.relative_path)
 
     def start_reindex_job(self, trigger: str, source: str, *, total_documents: int = 0) -> str:
         job_id = f"job-{uuid4().hex[:16]}"

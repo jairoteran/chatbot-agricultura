@@ -87,7 +87,6 @@ try {
             Write-Host "No se pudo consultar el progreso en /health. Reintentando..." -ForegroundColor DarkYellow
         }
     }
-
     Write-Progress -Id 1 -Activity "Reindexando documentos" -Completed
     $result = Receive-Job -Job $job -ErrorAction Stop
     $result | ConvertTo-Json -Depth 6

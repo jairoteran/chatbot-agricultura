@@ -19,7 +19,7 @@ const ADMIN_SESSION_STORAGE_KEY = "tesis-producto-admin-session";
 const initialMessage = {
   role: "assistant",
   content:
-    "Hola. Estoy listo para analizar los documentos cargados y responder con base en su contenido. Puede hacer preguntas, pedir resúmenes o comparar información entre archivos.",
+    "Hola. Estoy listo para ayudarte. Puede hacer preguntas, pedir resúmenes o comparar información cuando lo necesite.",
   sources: [],
 };
 
@@ -85,6 +85,7 @@ const initialBackendStatus = {
   llm_model: "",
   deployment_mode: "local",
   allow_reindex: true,
+  enable_vector_retrieval: true,
   runtime_reindex_progress: 0,
   runtime_reindex_stage: "",
   runtime_reindex_detail: "",
@@ -95,6 +96,9 @@ const initialBackendStatus = {
   last_input_tokens: 0,
   last_output_tokens: 0,
   last_total_tokens: 0,
+  last_generation_status: "not_used",
+  last_generation_error: "",
+  last_generation_model: "",
 };
 
 function readCachedHealthStatus() {
@@ -521,6 +525,27 @@ function adminReindexStageCopy(status) {
     return status.runtime_reindex_detail || "Ultimo reindexado completado correctamente.";
   }
   return "Aun no se ha ejecutado un reindexado manual.";
+}
+
+function documentStatusLabel(status) {
+  if (status === "indexed") {
+    return "Indexado";
+  }
+  if (status === "pending_index") {
+    return "Pendiente de indexar";
+  }
+  if (status === "failed") {
+    return "Con error";
+  }
+  if (status === "deleted") {
+    return "Eliminado";
+  }
+  return "Pendiente";
+}
+
+function compactListLabel(items, maxItems = 3) {
+  const values = (items || []).filter(Boolean).slice(0, maxItems);
+  return values.length ? values.join(", ") : "Sin etiquetas todavia";
 }
 
 function uploadFileToGcsSession(uploadUrl, file, onProgress) {
@@ -1295,7 +1320,7 @@ function AdminApp() {
         const response = await fetch(ADMIN_CONFIG_URL);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload.detail || "No fue posible cargar la configuracion administrativa.");
+          throw new Error(payload.detail || "No fue posible cargar la configuracion de gestion documental.");
         }
         if (!active) {
           return;
@@ -1305,7 +1330,7 @@ function AdminApp() {
         if (!active) {
           return;
         }
-        setErrorMessage(error.message || "No fue posible preparar el acceso administrativo.");
+        setErrorMessage(error.message || "No fue posible preparar el acceso de gestion documental.");
       } finally {
         if (active) {
           setIsLoadingConfig(false);
@@ -1338,7 +1363,7 @@ function AdminApp() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload.detail || "La sesion administrativa ya no es valida.");
+          throw new Error(payload.detail || "La sesion de gestion documental ya no es valida.");
         }
         if (!active) {
           return;
@@ -1351,7 +1376,7 @@ function AdminApp() {
           return;
         }
         setSession(null);
-        setErrorMessage(error.message || "La sesion administrativa expiró o no es valida.");
+        setErrorMessage(error.message || "La sesion de gestion documental expiro o no es valida.");
       } finally {
         if (active) {
           setIsValidatingSession(false);
@@ -1394,7 +1419,7 @@ function AdminApp() {
               });
               const payload = await response.json().catch(() => ({}));
               if (!response.ok) {
-                throw new Error(payload.detail || "No fue posible iniciar la sesion administrativa.");
+                throw new Error(payload.detail || "No fue posible iniciar la sesion de gestion documental.");
               }
               persistAdminSessionToken(payload.session_token);
               if (!active) {
@@ -1407,7 +1432,7 @@ function AdminApp() {
                 return;
               }
               setSession(null);
-              setErrorMessage(error.message || "No fue posible iniciar la sesion administrativa.");
+              setErrorMessage(error.message || "No fue posible iniciar la sesion de gestion documental.");
             } finally {
               if (active) {
                 setIsSigningIn(false);
@@ -1478,7 +1503,7 @@ function AdminApp() {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload.detail || "No fue posible cargar los documentos administrables.");
+          throw new Error(payload.detail || "No fue posible cargar los documentos del corpus.");
         }
         if (!active) {
           return;
@@ -1762,16 +1787,16 @@ function AdminApp() {
         {showAuthLanding ? (
           <div className="admin-auth-topbar">
             <div className="admin-auth-topbar-side" aria-hidden="true" />
-            <p className="eyebrow admin-auth-topbar-title">Gestion protegida</p>
+            <p className="eyebrow admin-auth-topbar-title">Gestion documental</p>
             <div className="admin-auth-topbar-side" aria-hidden="true" />
           </div>
         ) : (
           <div className="admin-header">
             <div>
-              <p className="eyebrow">Gestion protegida</p>
-              <h1>Panel de administracion</h1>
+              <p className="eyebrow">Gestion documental</p>
+              <h1>Panel de gestion documental</h1>
               <p className="admin-copy">
-                Esta zona prepara la carga manual y gestion de documentos. El chat publico sigue abierto para todos.
+                Esta zona controla la carga, curacion e indexacion del corpus. El chat publico sigue abierto para todos.
               </p>
             </div>
             <div className="admin-header-actions">
@@ -1798,7 +1823,7 @@ function AdminApp() {
         {isBusy && (
           <div className="admin-state-card">
             <strong>Verificando acceso</strong>
-            <p>Estamos validando la configuracion y tu sesion administrativa.</p>
+            <p>Estamos validando la configuracion y tu sesion de gestion documental.</p>
           </div>
         )}
 
@@ -1811,7 +1836,7 @@ function AdminApp() {
 
         {!isBusy && config && !config.enabled && (
           <div className="admin-state-card admin-state-warning">
-            <strong>Administracion aun no configurada</strong>
+            <strong>Gestion documental aun no configurada</strong>
             <p>
               Falta definir <code>GOOGLE_AUTH_CLIENT_ID</code>, <code>ADMIN_EMAILS</code> y <code>ADMIN_SESSION_SECRET</code> en el backend.
             </p>
@@ -1821,16 +1846,16 @@ function AdminApp() {
         {showAuthLanding && (
           <div className="admin-auth-landing">
             <div className="admin-auth-copy">
-              <h1>Panel de administracion</h1>
-              <p>Zona de carga manual y gestion de documentos. El chat publico sigue abierto para todos.</p>
+              <h1>Panel de gestion documental</h1>
+              <p>Zona de carga, curacion e indexacion del corpus. El chat publico sigue abierto para todos.</p>
             </div>
             <div className="admin-panel admin-auth-panel">
-              <h2>Panel de administración</h2>
-              <p>Zona de carga manual y gestión de documentos.</p>
+              <h2>Gestion documental</h2>
+              <p>Zona de carga, curacion e indexacion del corpus.</p>
               <p>El chat público sigue abierto para todos.</p>
               <div className="admin-auth-divider" />
               <div className="admin-auth-access-label">
-                <span>Acceso administrativo</span>
+                <span>Acceso autorizado</span>
               </div>
               <div className="admin-google-button-shell">
                 <div className="admin-google-button" aria-hidden="true">
@@ -1861,14 +1886,14 @@ function AdminApp() {
                   className={`admin-google-button-hitbox${isSigningIn ? " is-busy" : ""}`}
                 />
               </div>
-              <p className="admin-auth-footnote">Solo cuentas autorizadas pueden acceder al panel interno.</p>
-              {isSigningIn && <p className="status-meta">Validando cuenta administrativa...</p>}
+              <p className="admin-auth-footnote">Solo cuentas autorizadas pueden gestionar el corpus documental.</p>
+              {isSigningIn && <p className="status-meta">Validando cuenta autorizada...</p>}
             </div>
           </div>
         )}
 
         {!isBusy && config?.enabled && managementReady && (
-          <nav className="admin-section-nav" aria-label="Secciones de administracion">
+          <nav className="admin-section-nav" aria-label="Secciones de gestion documental">
             {adminSections.map((section) => (
               <button
                 key={section.id}
@@ -1908,7 +1933,7 @@ function AdminApp() {
               </div>
               <div className="admin-detail-list">
                 <div className="admin-detail-row">
-                  <span>Cuenta administradora</span>
+                  <span>Cuenta autorizada</span>
                   <strong>{adminEmail}</strong>
                 </div>
                 <div className="admin-detail-row">
@@ -2075,7 +2100,7 @@ function AdminApp() {
           <div className="admin-grid admin-grid-wide admin-grid-single">
             <div className="admin-panel">
               <span className="status-card-label">Biblioteca interna</span>
-              <h2>Documentos disponibles para administracion</h2>
+              <h2>Documentos disponibles en gestion</h2>
               <p className="status-meta">
                 {isLoadingDocuments ? "Actualizando lista..." : "Explora, revisa y elimina archivos desde un solo lugar."}
               </p>
@@ -2084,7 +2109,11 @@ function AdminApp() {
                   <div key={document.relative_path} className="admin-document-row">
                     <div className="admin-document-copy">
                       <strong>{document.file_name}</strong>
-                      <span>{Math.max(1, Math.round(document.size / 1024))} KB</span>
+                      <span>
+                        {Math.max(1, Math.round(document.size / 1024))} KB · {documentStatusLabel(document.status)}
+                      </span>
+                      <span>{compactListLabel(document.topics?.length ? document.topics : document.key_terms)}</span>
+                      {document.entities?.length > 0 && <span>{compactListLabel(document.entities, 2)}</span>}
                     </div>
                     <button
                       type="button"
@@ -2097,7 +2126,7 @@ function AdminApp() {
                   </div>
                 ))}
                 {!isLoadingDocuments && documents.length === 0 && (
-                  <p className="status-meta">Aun no hay documentos cargados para administracion.</p>
+                  <p className="status-meta">Aun no hay documentos cargados para gestion documental.</p>
                 )}
               </div>
             </div>

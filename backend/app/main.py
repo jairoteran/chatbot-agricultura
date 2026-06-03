@@ -36,7 +36,7 @@ from app.schemas import (
     HealthResponse,
     ReindexResponse,
 )
-from app.metadata_models import DocumentRecord
+from app.metadata_models import DOCUMENT_STATUS_PENDING_INDEX, DocumentRecord
 
 settings = get_settings()
 cloud_layout = get_cloud_layout(settings)
@@ -79,7 +79,7 @@ def _admin_auth_guard() -> None:
         raise HTTPException(
             status_code=503,
             detail=(
-                "La administracion segura aun no esta configurada. "
+                "La gestion documental segura aun no esta configurada. "
                 "Define GOOGLE_AUTH_CLIENT_ID, ADMIN_EMAILS y ADMIN_SESSION_SECRET."
             ),
         )
@@ -87,7 +87,7 @@ def _admin_auth_guard() -> None:
 
 def _extract_bearer_token(authorization: str | None) -> str:
     if not authorization:
-        raise HTTPException(status_code=401, detail="Falta la sesion administrativa.")
+        raise HTTPException(status_code=401, detail="Falta la sesion de gestion documental.")
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(status_code=401, detail="La cabecera Authorization no es valida.")
@@ -106,7 +106,7 @@ def require_admin_session(authorization: str | None = Header(default=None)) -> A
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     if session.email not in settings.admin_emails:
-        raise HTTPException(status_code=403, detail="Tu cuenta no tiene permisos administrativos.")
+        raise HTTPException(status_code=403, detail="Tu cuenta no esta autorizada para gestionar el corpus documental.")
 
     return AdminSessionResponse(
         authenticated=True,
@@ -118,12 +118,17 @@ def require_admin_session(authorization: str | None = Header(default=None)) -> A
     )
 
 
-def _document_record_payload(item) -> AdminDocumentRecord:
+def _document_record_payload(item, metadata: DocumentRecord | None = None) -> AdminDocumentRecord:
     return AdminDocumentRecord(
         file_name=item.file_name,
         relative_path=item.relative_path,
         size=item.size,
         fingerprint=item.fingerprint,
+        status=metadata.status if metadata is not None else DOCUMENT_STATUS_PENDING_INDEX,
+        topics=metadata.topics if metadata is not None else [],
+        entities=metadata.entities if metadata is not None else [],
+        key_terms=metadata.key_terms if metadata is not None else [],
+        nlp_analyzer=metadata.nlp_analyzer if metadata is not None else "",
     )
 
 
@@ -209,7 +214,7 @@ def _trigger_cloud_run_reindex_job() -> dict:
 
     return {
         "status": "ok",
-        "detail": "Reindexado lanzado correctamente desde el panel de administracion.",
+        "detail": "Reindexado lanzado correctamente desde el panel de gestion documental.",
         "indexed_files": [],
         "indexed_documents": [],
         "index_source": "cloud-run-job",
@@ -317,7 +322,7 @@ def create_admin_google_session(payload: AdminGoogleSessionRequest) -> AdminSess
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     if identity.email not in settings.admin_emails:
-        raise HTTPException(status_code=403, detail="Tu cuenta no tiene permisos administrativos.")
+        raise HTTPException(status_code=403, detail="Tu cuenta no esta autorizada para gestionar el corpus documental.")
 
     session_token, expires_at = create_admin_session_token(
         identity.email,
@@ -342,8 +347,12 @@ def get_admin_session(session: AdminSessionResponse = Depends(require_admin_sess
 @app.get("/admin/documents", response_model=AdminDocumentListResponse)
 def list_admin_documents(_: AdminSessionResponse = Depends(require_admin_session)) -> AdminDocumentListResponse:
     records = document_repository.list_pdf_files()
+    metadata_by_path = {
+        item.relative_path: item
+        for item in metadata_repository.list_document_records()
+    }
     return AdminDocumentListResponse(
-        documents=[_document_record_payload(item) for item in records],
+        documents=[_document_record_payload(item, metadata_by_path.get(item.relative_path)) for item in records],
         total_documents=len(records),
         source=document_repository.describe_source(),
     )
@@ -373,7 +382,7 @@ async def upload_admin_document(
             storage_path=_document_storage_path(record.relative_path),
             fingerprint=record.fingerprint or _fingerprint_bytes(content),
             size=record.size,
-            status="uploaded",
+            status=DOCUMENT_STATUS_PENDING_INDEX,
         )
     )
     return AdminDocumentMutationResponse(
@@ -447,7 +456,7 @@ def complete_admin_document_upload(
             storage_path=_document_storage_path(record.relative_path),
             fingerprint=record.fingerprint,
             size=record.size,
-            status="uploaded",
+            status=DOCUMENT_STATUS_PENDING_INDEX,
         )
     )
     return AdminDocumentMutationResponse(

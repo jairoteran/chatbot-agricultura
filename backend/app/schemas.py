@@ -58,6 +58,7 @@ class HealthResponse(BaseModel):
     llm_model: str = ""
     deployment_mode: str = "local"
     allow_reindex: bool = True
+    enable_vector_retrieval: bool = True
     document_storage_backend: str = "local"
     index_storage_backend: str = "local"
     metadata_backend: str = "none"
@@ -79,6 +80,9 @@ class HealthResponse(BaseModel):
     last_input_tokens: int = 0
     last_output_tokens: int = 0
     last_total_tokens: int = 0
+    last_generation_status: str = "not_used"
+    last_generation_error: str = ""
+    last_generation_model: str = ""
 
 
 class ReindexResponse(BaseModel):
@@ -137,6 +141,11 @@ class AdminDocumentRecord(BaseModel):
     relative_path: str
     size: int
     fingerprint: str = ""
+    status: str = "pending_index"
+    topics: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    key_terms: list[str] = Field(default_factory=list)
+    nlp_analyzer: str = ""
 
 
 class AdminDocumentListResponse(BaseModel):

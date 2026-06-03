@@ -101,6 +101,32 @@ Su valor practico es que:
 - permite justificar academicamente de donde sale la informacion
 - separa el sistema de un chatbot generativo libre
 
+Cada documento del corpus puede tener estado operativo:
+
+- `pending_index`: cargado o actualizado, pero aun no incorporado al indice vigente
+- `indexed`: incorporado al indice vigente y disponible para consulta
+- `deleted`: eliminado del corpus operativo
+- `failed`: no pudo procesarse correctamente
+
+## gestion documental
+
+Es el conjunto de operaciones protegidas para mantener el corpus.
+
+En este proyecto incluye:
+
+- subir PDFs
+- listar documentos
+- eliminar documentos
+- ejecutar reindexado manual
+
+No debe presentarse como una jerarquia rigida de roles. En la fase actual se controla mediante cuentas autorizadas.
+
+## cuentas autorizadas
+
+Son las cuentas de Google permitidas para operar la gestion documental.
+
+En el backend se configuran con `ADMIN_EMAILS` por compatibilidad tecnica, pero metodologicamente representan acceso autorizado al corpus, no necesariamente un rol unico de administrador.
+
 ## RAG
 
 Significa `Retrieval-Augmented Generation`.
@@ -146,11 +172,13 @@ Su papel actual no es el chatbot final, sino la recuperacion semantica del corpu
 
 Es una libreria de NLP orientada a produccion.
 
-Todavia no esta integrada en el proyecto, pero se considera una mejora futura util para:
+En este proyecto se usa como capa de enriquecimiento del corpus para:
 
 - extraer entidades
-- limpiar texto
-- detectar conceptos o temas con mas precision
+- detectar temas y terminos clave
+- registrar metadatos documentales durante el reindexado
+
+Si no hay un modelo entrenado de espanol instalado, el sistema usa un fallback propio con vocabulario de dominio para mantener el flujo estable.
 
 ## NLTK
 
@@ -161,3 +189,5 @@ Actualmente no forma parte del sistema, pero podria servir en el futuro para:
 - stopwords personalizadas
 - tokenizacion adicional
 - limpieza o normalizacion basica del texto
+
+Por ahora no se agrega al runtime porque `spaCy`, las reglas propias de limpieza y `sentence-transformers` cubren mejor las necesidades actuales.

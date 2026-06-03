@@ -16,12 +16,14 @@ Esta carpeta centraliza la documentacion operativa y de seguimiento del proyecto
 
 En el estado actual del proyecto, los cambios mas relevantes quedaron documentados en:
 
-- `project-status.md`: estado consolidado del panel admin, reindexado manual y proximos pasos de despliegue
-- `architecture.md`: decisiones de arquitectura sobre panel administrativo, autenticacion Google y politica de reindexado manual
+- `project-status.md`: estado consolidado del panel de gestion documental, reindexado manual y proximos pasos de despliegue
+- `architecture.md`: decisiones de arquitectura sobre gestion documental, autenticacion Google, cuentas autorizadas y politica de reindexado manual
 - `architecture.md`: tambien documenta el modelo NLP real del sistema, el papel de Gemini y Hugging Face, el concepto de corpus y la evolucion recomendada de gobernanza documental
-- `cloud-run-jobs.md`: operacion cloud actual, variables necesarias para admin y uso manual del reindexado
+- `architecture.md`: documenta el enriquecimiento del corpus con `spaCy` y la decision de no incorporar `NLTK` mientras no aporte valor adicional claro
+- `cloud-run-jobs.md`: operacion cloud actual, variables necesarias para acceso protegido y uso manual del reindexado
 - `evidence-log.md`: errores importantes encontrados, decisiones tecnicas y correcciones aplicadas durante este bloque
-- `glossary.md`: incluye definiciones practicas de `RAG`, `corpus`, `embeddings`, `Gemini`, `Hugging Face`, `spaCy` y `NLTK`
+- `evidence-log.md`: tambien registra cambios visibles de interfaz, tono conversacional y validaciones de build cuando afectan la experiencia del usuario
+- `glossary.md`: incluye definiciones practicas de `RAG`, `corpus`, estados documentales, `embeddings`, `Gemini`, `Hugging Face`, `spaCy` y `NLTK`
 
 ## Regla de mantenimiento
 

@@ -55,23 +55,23 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - que pantalla o endpoint se reviso
 - que resultado salio
 
-## 2026-05-17 - Panel administrativo con autenticacion Google y gestion documental
+## 2026-05-17 - Panel de gestion documental con autenticacion Google
 
 - Contexto: se necesitaba dejar una vista protegida para operaciones internas sin cerrar el chat publico.
-- Evidencia: se incorporo una ruta administrativa `/gestion` dentro del frontend con tarjeta de acceso protegida, paneles de resumen, documentos y monitoreo.
-- Evidencia: el backend expone flujo de sesion administrativa, lista blanca de correos y endpoints protegidos para listar, subir y eliminar documentos.
+- Evidencia: se incorporo una ruta protegida `/gestion` dentro del frontend con tarjeta de acceso, paneles de resumen, documentos y monitoreo.
+- Evidencia: el backend expone flujo de sesion de gestion documental, lista blanca de correos y endpoints protegidos para listar, subir y eliminar documentos.
 - Evidencia: el archivo `backend/cloudrun.env.yaml` quedo preparado con `GOOGLE_AUTH_CLIENT_ID` y `ADMIN_EMAILS` para el despliegue cloud actual.
 
 ## 2026-05-17 - Error al intentar usar un boton Google completamente custom
 
-- Contexto: se intento hacer que el acceso administrativo usara un boton visual 100 por ciento propio.
+- Contexto: se intento hacer que el acceso de gestion documental usara un boton visual 100 por ciento propio.
 - Evidencia: el flujo termino mostrando mensajes equivalentes a `No se pudo completar el acceso` y `No fue posible abrir el acceso con Google en este momento`.
 - Evidencia: la salida tecnica correcta fue mantener el click real sobre el renderizado de Google Identity Services y superponer una capa visual custom, en lugar de disparar un flujo manual inestable.
 
 ## 2026-05-17 - Reindexado automatico deshabilitado y paso a operacion manual
 
 - Contexto: se decidio que la API web no reconstruya el indice por si sola cuando detecte cambios en los PDFs.
-- Evidencia: `backend/app/rag_service.py` fue ajustado para dejar el indice como pendiente y exigir reindexado manual desde administracion.
+- Evidencia: `backend/app/rag_service.py` fue ajustado para dejar el indice como pendiente y exigir reindexado manual desde gestion documental.
 - Evidencia: `frontend/src/App.jsx` incorporo un boton `Reindexar ahora` dentro del panel de documentos y refresco de estado despues de subir, borrar o reindexar.
 - Evidencia: el panel ahora bloquea acciones concurrentes de subir, eliminar y reindexar para evitar estados intermedios del indice.
 
@@ -83,16 +83,16 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 
 ## 2026-05-30 - Subida directa de PDFs pesados a Cloud Storage
 
-- Contexto: el panel admin ya no podia depender de requests web tradicionales porque `Cloud Run` impone limites de tamano y varios documentos reales superaban 30 MB.
+- Contexto: el panel de gestion documental ya no podia depender de requests web tradicionales porque `Cloud Run` impone limites de tamano y varios documentos reales superaban 30 MB.
 - Evidencia: se rediseño el flujo de carga para pedir una sesion de subida desde backend y transferir el archivo directamente desde el navegador a `Cloud Storage`, dejando la API solo para autorizar y registrar metadatos.
 - Evidencia: durante la primera validacion aparecio un error `No 'Access-Control-Allow-Origin' header is present`, que obligo a configurar `CORS` en el bucket documental y a propagar correctamente el header `Origin` al crear la sesion resumable.
 
 ## 2026-05-30 - Reindexado manual real mediante Cloud Run Jobs
 
-- Contexto: el objetivo era que el boton `Reindexar ahora` del panel admin fuera manual, funcional y coherente con la arquitectura cloud.
+- Contexto: el objetivo era que el boton `Reindexar ahora` del panel de gestion documental fuera manual, funcional y coherente con la arquitectura cloud.
 - Evidencia: el flujo se ajusto para que la API lance el job `tesis-producto-reindex` en `Cloud Run Jobs` y marque primero un estado `queued` visible desde el panel.
 - Evidencia: aparecio el error `Permission 'run.jobs.run' denied`, lo que obligo a conceder `roles/run.jobsExecutor` a la service account de la API para poder disparar el job desde backend.
-- Evidencia: el panel admin quedo mostrando progreso real del reindexado, primero por estado de cola y luego por avance operativo persistido en backend.
+- Evidencia: el panel de gestion documental quedo mostrando progreso real del reindexado, primero por estado de cola y luego por avance operativo persistido en backend.
 
 ## 2026-05-30 - Limpieza de tono y estructura de respuestas del asistente
 
@@ -100,12 +100,64 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: `backend/app/rag_service.py` fue ajustado para responder de forma mas directa, natural y segura, dejando las fuentes en un panel aparte en lugar de repetir dentro del texto `segun el documento` o frases similares.
 - Evidencia: se eliminaron encabezados forzados en respuestas y resúmenes, y tambien se quito la inyeccion de keywords mecanicas que generaba salidas poco naturales como `luis, hacer, guerrero`.
 
+## 2026-05-31 - Gestion documental sin roles rigidos
+
+- Contexto: se recibio la recomendacion de evitar presentar el sistema como dependiente de roles rigidos o de un unico administrador.
+- Evidencia: se ajusto el lenguaje visible del frontend para hablar de `gestion documental`, `corpus` y `cuentas autorizadas` en la ruta `/gestion`.
+- Evidencia: el backend mantiene endpoints y nombres tecnicos `admin` por compatibilidad, pero los mensajes devueltos al usuario ahora hablan de gestion documental y autorizacion sobre el corpus.
+- Evidencia: `docs/architecture.md` registra la decision de mantener control operativo con cuentas autorizadas sin convertirlo metodologicamente en una jerarquia de roles.
+
+## 2026-05-31 - Enriquecimiento NLP del corpus con spaCy
+
+- Contexto: se busco fortalecer la tesis incorporando un modelo de corpus mas claro y una capa NLP adicional sin agregar dependencias innecesarias.
+- Evidencia: `backend/app/metadata_models.py` amplio `DocumentRecord` con estados documentales y metadatos como `topics`, `entities`, `key_terms` y `nlp_analyzer`.
+- Evidencia: `backend/app/corpus_analyzer.py` incorpora analisis con `spaCy` cuando esta disponible y fallback de dominio para mantener compatibilidad local/cloud.
+- Evidencia: durante el reindexado, `backend/app/rag_service.py` agrupa fragmentos por documento y sincroniza los metadatos enriquecidos en Firestore mediante `metadata_repository.sync_documents`.
+- Evidencia: el panel de gestion documental muestra estado de cada documento y etiquetas principales cuando existen.
+- Decision: `NLTK` no se incorpora en runtime por ahora porque no aporta una mejora clara frente a `spaCy`, reglas propias de limpieza y embeddings actuales.
+
+## 2026-05-31 - Cloud respondia distinto por usar lexical-only
+
+- Contexto: despues del despliegue, las respuestas en cloud no sonaban igual que en local.
+- Evidencia: `/health` de Cloud Run mostro `embed_model: lexical-only`, `index_source: chunk-cache` y `allow_reindex: false`, indicando que la API cloud no estaba cargando el indice vectorial.
+- Causa: `ALLOW_RUNTIME_REINDEX=false` estaba acoplado indirectamente a no preparar el backend de embeddings, por lo que cloud degradaba a recuperacion lexica.
+- Correccion: se agrego `ENABLE_VECTOR_RETRIEVAL` para permitir retrieval vectorial en la API web sin habilitar reconstruccion de indices durante trafico normal.
+
+## 2026-05-31 - Diagnostico de caida generativa en cloud
+
+- Contexto: aun con retrieval vectorial activo, una respuesta cloud salio como fallback extractivo y no con el tono conversacional que si aparecia en localhost.
+- Evidencia: se agregaron `last_generation_status` y `last_generation_error` al estado de `/health` para saber si Gemini respondio, devolvio vacio o fallo durante la consulta.
+- Evidencia: se mejoro el fallback extractivo para limpiar encabezados OCR y redactar con una entrada mas natural si el LLM no devuelve texto.
+- Motivo: si Gemini falla por secreto, cuota, timeout, safety o respuesta vacia, el sistema ya no debe devolver fragmentos crudos como respuesta final.
+
+## 2026-05-31 - Alta demanda de Gemini y 504 en frontend Cloud Run
+
+- Contexto: el frontend reporto `POST /api/chat 504 Gateway Timeout` mientras la API registraba `503 UNAVAILABLE` de Gemini por alta demanda del modelo.
+- Evidencia: `/health` mostro `last_generation_error` con `This model is currently experiencing high demand` y latencia de respuesta de mas de 37 segundos.
+- Correccion: se agrego `GEMINI_FALLBACK_MODEL` para intentar un segundo modelo Gemini cuando el principal devuelva `503 UNAVAILABLE`.
+- Correccion: `frontend/nginx.conf` amplio `proxy_connect_timeout`, `proxy_send_timeout` y `proxy_read_timeout` a `120s` para evitar cortes prematuros del proxy del frontend en Cloud Run.
+
+## 2026-05-31 - Objetivo de respuesta menor a 3 segundos
+
+- Contexto: se definio que el chat debe priorizar tiempos de respuesta menores a 3 segundos.
+- Evidencia: se agrego `LLM_TIMEOUT_SECONDS` con valor recomendado `2.2` para cortar llamadas lentas al proveedor generativo antes de que la API supere el objetivo de latencia.
+- Decision: si Gemini no responde dentro de esa ventana, el sistema debe devolver un fallback limpio basado en recuperacion documental antes que bloquear la interfaz.
+- Riesgo aceptado: una respuesta fallback puede ser menos natural que una respuesta generativa completa, pero evita `504 Gateway Timeout` y mantiene la experiencia operativa.
+
 ## 2026-05-30 - Simplificacion de la interfaz publica y experiencia movil
 
 - Contexto: la interfaz publica seguia mostrando elementos secundarios que quitaban espacio al chat, especialmente en celulares.
 - Evidencia: se ocultaron contadores internos de documentos, bloques secundarios como la biblioteca lateral y se limpiaron titulos feos del selector de resumen para mostrar nombres mas legibles.
 - Evidencia: en movil se rediseño el sidebar como un drawer desplegable, dejando el chat como pantalla principal y moviendo al menu lateral las herramientas de resumen y preguntas frecuentes.
 - Evidencia: en la primera iteracion el panel lateral quedo abierto permanentemente por un choque entre `motion` y `transform` en CSS; la correccion final cambio ese comportamiento a una apertura controlada por posicion lateral para que el drawer arranque realmente cerrado.
+
+## 2026-06-02 - Saludo inicial mas neutro
+
+- Contexto: el mensaje inicial del chat publico mencionaba que el asistente estaba listo para analizar documentos cargados, aunque la primera interaccion no siempre parte de una carga explicita del usuario.
+- Evidencia: se cambio el saludo inicial en `frontend/src/App.jsx` por una frase mas general: `Hola. Estoy listo para ayudarte. Puede hacer preguntas, pedir resúmenes o comparar información cuando lo necesite.`
+- Evidencia: se ejecuto `npm run build` en `frontend` y el texto anterior dejo de aparecer en el proyecto.
+- Resultado: `correcto`
+- Uso futuro: `interfaz`, `implementacion`, `pruebas`
 
 ### Resultado
 

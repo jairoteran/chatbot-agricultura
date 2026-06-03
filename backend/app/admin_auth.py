@@ -80,7 +80,7 @@ def create_admin_session_token(email: str, *, secret: str, ttl_seconds: int) -> 
 
 def verify_admin_session_token(token: str, *, secret: str) -> AdminSession:
     if not token or "." not in token:
-        raise AdminAuthError("La sesion administrativa es invalida.")
+        raise AdminAuthError("La sesion de gestion documental es invalida.")
 
     payload_b64, signature_b64 = token.split(".", 1)
     expected_signature = hmac.new(
@@ -89,21 +89,21 @@ def verify_admin_session_token(token: str, *, secret: str) -> AdminSession:
         hashlib.sha256,
     ).digest()
     if not hmac.compare_digest(signature_b64, _b64url_encode(expected_signature)):
-        raise AdminAuthError("La sesion administrativa no es valida.")
+        raise AdminAuthError("La sesion de gestion documental no es valida.")
 
     try:
         payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
     except Exception as exc:
-        raise AdminAuthError("La sesion administrativa no se pudo interpretar.") from exc
+        raise AdminAuthError("La sesion de gestion documental no se pudo interpretar.") from exc
 
     if payload.get("typ") != "admin_session" or payload.get("v") != 1:
-        raise AdminAuthError("La sesion administrativa tiene un formato no soportado.")
+        raise AdminAuthError("La sesion de gestion documental tiene un formato no soportado.")
 
     email = str(payload.get("sub", "")).strip().lower()
     expires_at = int(payload.get("exp", 0) or 0)
     if not email or expires_at <= 0:
-        raise AdminAuthError("La sesion administrativa esta incompleta.")
+        raise AdminAuthError("La sesion de gestion documental esta incompleta.")
     if expires_at <= int(time.time()):
-        raise AdminAuthError("La sesion administrativa ya expiro.")
+        raise AdminAuthError("La sesion de gestion documental ya expiro.")
 
     return AdminSession(email=email, expires_at=expires_at)

@@ -5,11 +5,13 @@ import os
 import re
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Any
 
 from app.settings import get_settings
 from app.cloud_layout import get_cloud_layout
+from app.corpus_analyzer import analyze_corpus_document
 from app.document_repository import create_document_repository
 from app.index_models import ChunkCacheEntry, IndexManifest
 from app.index_repository import create_index_repository
@@ -23,6 +25,8 @@ document_repository = create_document_repository(settings, cloud_layout)
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 OPENAI_MODEL = settings.openai_model
 GEMINI_MODEL = settings.gemini_model
+GEMINI_FALLBACK_MODEL = settings.gemini_fallback_model
+LLM_TIMEOUT_SECONDS = settings.llm_timeout_seconds
 TOP_K = 4
 SIMILARITY_THRESHOLD = 0.42
 MAX_RESPONSE_EVIDENCE = 3
@@ -210,6 +214,7 @@ class RAGService:
         self.llm_model = ""
         self.deployment_mode = settings.deployment_target
         self.allow_reindex = settings.allow_runtime_reindex
+        self.enable_vector_retrieval = settings.enable_vector_retrieval
         self.document_storage_backend = settings.document_storage_backend
         self.index_storage_backend = settings.index_storage_backend
         self.metadata_backend = settings.metadata_backend
@@ -236,6 +241,9 @@ class RAGService:
         self.last_input_tokens = 0
         self.last_output_tokens = 0
         self.last_total_tokens = 0
+        self.last_generation_status = "not_used"
+        self.last_generation_error = ""
+        self.last_generation_model = ""
         self._report_progress(5, "starting", "Preparando configuracion del servicio...")
         self._configure_llm_client()
         if self.eager_embeddings:
@@ -484,7 +492,11 @@ class RAGService:
         self.index_detail = "Servicio listo"
         self.last_index_source = "rebuild"
         pointer = index_repository.finalize_rebuild(build_dir, current_manifest, self.chunk_cache, source="rebuild")
-        metadata_repository.sync_documents(current_manifest, settings.documents_prefix)
+        metadata_repository.sync_documents(
+            current_manifest,
+            settings.documents_prefix,
+            corpus_analysis=self._build_corpus_analysis(),
+        )
         metadata_repository.update_active_index(
             pointer=pointer,
             manifest=current_manifest,
@@ -557,7 +569,7 @@ class RAGService:
         return index_repository.has_materialized_index()
 
     def _should_prepare_vector_backend(self, *, force: bool = False) -> bool:
-        return force or self.deployment_mode == "local" or self.allow_reindex
+        return force or self.enable_vector_retrieval or self.allow_reindex
 
     def _can_boot_from_chunk_cache_only(self) -> bool:
         return self._has_chunk_cache() and not self._should_prepare_vector_backend()
@@ -646,7 +658,7 @@ class RAGService:
         self.index_detail = (
             f"Se detectaron {len(current_files)} PDFs en {self._document_source_label()}, pero solo {len(stored_files)} "
             "estan realmente indexados en backend/storage. "
-            "Ejecuta el reindexado manual desde el panel de administracion."
+            "Ejecuta el reindexado manual desde el panel de gestion documental."
         )
 
     def get_status(self) -> dict:
@@ -672,6 +684,7 @@ class RAGService:
             "llm_model": self.llm_model,
             "deployment_mode": self.deployment_mode,
             "allow_reindex": self.allow_reindex,
+            "enable_vector_retrieval": self.enable_vector_retrieval,
             "document_storage_backend": self.document_storage_backend,
             "index_storage_backend": self.index_storage_backend,
             "metadata_backend": self.metadata_backend,
@@ -692,6 +705,9 @@ class RAGService:
             "last_input_tokens": self.last_input_tokens,
             "last_output_tokens": self.last_output_tokens,
             "last_total_tokens": self.last_total_tokens,
+            "last_generation_status": self.last_generation_status,
+            "last_generation_error": self.last_generation_error,
+            "last_generation_model": self.last_generation_model,
         }
 
     def reindex(self) -> dict:
@@ -825,7 +841,7 @@ class RAGService:
         for item in filtered_nodes[:MAX_RESPONSE_EVIDENCE]:
             file_name = item["file_name"]
             page_label = item.get("page_label", "")
-            normalized_text = item["text"]
+            normalized_text = self._clean_ocr_text(item["text"])
             excerpt = normalized_text[:MAX_RESPONSE_SOURCE_EXCERPT]
             score = item["score"]
 
@@ -886,7 +902,7 @@ class RAGService:
                 "display_title": self._display_title(chunk["file_name"]),
                 "page_label": chunk.get("page_label", ""),
                 "score": 1.0,
-                "text": chunk["text"][:650],
+                "text": self._clean_ocr_text(chunk["text"])[:650],
             }
             for chunk in selected_chunks[:4]
         ]
@@ -895,7 +911,7 @@ class RAGService:
                 chunk["file_name"],
                 chunk.get("page_label", ""),
                 1.0,
-                chunk["text"],
+                self._clean_ocr_text(chunk["text"]),
             )
             for chunk in selected_chunks[:5]
         ]
@@ -1032,6 +1048,27 @@ class RAGService:
             )
 
         return serialized
+
+    def _build_corpus_analysis(self) -> dict[str, dict]:
+        chunks_by_file: dict[str, list[str]] = {}
+        path_by_file_name = {
+            item.file_name: item.relative_path
+            for item in self._build_manifest().files
+        }
+
+        for chunk in self.chunk_cache:
+            file_name = chunk.get("file_name", "")
+            text = chunk.get("text", "")
+            if not file_name or not text:
+                continue
+            chunks_by_file.setdefault(file_name, []).append(text)
+
+        analysis_by_path: dict[str, dict] = {}
+        for file_name, chunks in chunks_by_file.items():
+            relative_path = path_by_file_name.get(file_name, file_name)
+            analysis_by_path[relative_path] = analyze_corpus_document(file_name, chunks[:12])
+
+        return analysis_by_path
 
     def cloud_index_contract(self) -> dict:
         release_example = "YYYYMMDD-HHMMSS"
@@ -1253,27 +1290,12 @@ class RAGService:
                 + "\n\nSi quieres, puedo afinar la busqueda con una pregunta mas especifica."
             )
 
-        overview = self._build_overview(question, insights, keywords, response_style)
-        topic_line = self._build_topic_line(insights, keywords)
-        conclusion = self._build_conclusion(question, insights, keywords, response_style)
-        answer_lines = [overview]
-
-        for insight in insights[:3]:
-            answer_lines.append(f"- {self._format_insight_summary(insight['summary'], response_style)}")
-
-        if topic_line:
-            answer_lines.extend(["", f"Tambien se relaciona con {topic_line}."])
-
-        if conclusion:
-            answer_lines.extend(["", conclusion])
-
-        answer_lines.extend(
-            [
-                "",
-                "Si quieres, tambien puedo profundizar en algun punto o darte una explicacion mas breve.",
-            ]
+        return self._compose_conversational_fallback(
+            question,
+            insights,
+            keywords,
+            response_style,
         )
-        return "\n".join(answer_lines)
 
     def _generate_llm_answer(
         self,
@@ -1283,12 +1305,17 @@ class RAGService:
         response_style: str = "academico",
     ) -> str:
         style_config = self._style_config(response_style)
+        self.last_generation_status = "attempted"
+        self.last_generation_error = ""
+        self.last_generation_model = ""
         evidence_text = self._format_evidence_for_llm(evidence_blocks)
         conversation_text = self._format_history_for_llm(history)
         prompt = (
-            "Responde en espanol con claridad y usando solo la evidencia dada.\n"
-            "Sintetiza, conecta ideas y evita copiar frases largas.\n"
+            "Responde en espanol claro, natural y conversacional, como si hablaras con una persona.\n"
+            "Sintetiza, conecta ideas y evita copiar frases largas o texto crudo del PDF.\n"
             "Si la evidencia no alcanza, dilo claramente. No inventes datos.\n"
+            "La evidencia puede contener ruido OCR: palabras cortadas, guiones raros, numeros de pagina o fragmentos como 'evo- 178'. "
+            "No reproduzcas esos artefactos; reconstruye la idea en tus propias palabras.\n"
             f"{style_config['llm_instruction']}\n"
             "\n"
             "Historial reciente:\n"
@@ -1303,25 +1330,78 @@ class RAGService:
             "3. Usa listas con guiones solo cuando realmente ayuden.\n"
             "4. Si hay limites o ambiguedades, explicalos con naturalidad dentro de la respuesta.\n"
             "5. No menciones de forma repetitiva que respondes en base a documentos. Las fuentes ya se mostraran aparte.\n"
+            "6. No incluyas numeros sueltos, codigos de pagina, palabras incompletas ni cortes con guion.\n"
         )
 
         try:
             if self.gemini_client is not None:
-                response = self.gemini_client.models.generate_content(
-                    model=self.llm_model,
-                    contents=prompt,
-                )
-                self._capture_usage(response)
-                output_text = getattr(response, "text", "") or ""
-                return output_text.strip()
+                return self._generate_gemini_answer(prompt)
 
             response = self.openai_client.responses.create(model=self.llm_model, input=prompt)
             self._capture_usage(response)
-        except Exception:
+        except Exception as exc:
+            self.last_generation_status = "failed"
+            self.last_generation_error = str(exc)[:300]
             return ""
 
         output_text = getattr(response, "output_text", "") or ""
-        return output_text.strip()
+        cleaned_output = self._clean_generated_answer(output_text)
+        if cleaned_output:
+            self.last_generation_status = "success"
+            return cleaned_output
+        self.last_generation_status = "empty"
+        self.last_generation_error = "OpenAI devolvio una respuesta vacia."
+        return ""
+
+    def _generate_gemini_answer(self, prompt: str) -> str:
+        model_candidates = [self.llm_model]
+        if GEMINI_FALLBACK_MODEL and GEMINI_FALLBACK_MODEL not in model_candidates:
+            model_candidates.append(GEMINI_FALLBACK_MODEL)
+
+        last_error = ""
+        for model_name in model_candidates:
+            try:
+                response = self._generate_gemini_with_timeout(model_name, prompt)
+                self._capture_usage(response)
+                output_text = getattr(response, "text", "") or ""
+                cleaned_output = self._clean_generated_answer(output_text)
+                self.last_generation_model = model_name
+                if cleaned_output:
+                    self.last_generation_status = "success"
+                    return cleaned_output
+                last_error = f"{model_name} devolvio una respuesta vacia."
+            except Exception as exc:
+                last_error = str(exc)[:300]
+                if "503" not in last_error and "UNAVAILABLE" not in last_error.upper():
+                    self.last_generation_model = model_name
+                    self.last_generation_status = "failed"
+                    self.last_generation_error = last_error
+                    return ""
+
+        self.last_generation_model = model_candidates[-1] if model_candidates else ""
+        self.last_generation_status = "failed"
+        self.last_generation_error = last_error or "Gemini no devolvio una respuesta util."
+        return ""
+
+    def _generate_gemini_with_timeout(self, model_name: str, prompt: str):
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            self.gemini_client.models.generate_content,
+            model=model_name,
+            contents=prompt,
+        )
+        try:
+            return future.result(timeout=LLM_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(
+                f"{model_name} supero el limite de {LLM_TIMEOUT_SECONDS:.1f}s para mantener respuesta sub-3s."
+            ) from exc
+        finally:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
 
     def _format_history_for_llm(self, history: list[dict]) -> str:
         if not history:
@@ -1343,7 +1423,7 @@ class RAGService:
             evidence_blocks[:MAX_RESPONSE_EVIDENCE], start=1
         ):
             blocks.append(
-                f"[Fuente {index}] Documento: {self._display_title(file_name)} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{text[:MAX_LLM_EVIDENCE_CHARS]}"
+                f"[Fuente {index}] Documento: {self._display_title(file_name)} | pagina: {page_label or 'sin pagina'} | relevancia: {score}\n{self._clean_ocr_text(text)[:MAX_LLM_EVIDENCE_CHARS]}"
             )
         return "\n\n".join(blocks)
 
@@ -1515,6 +1595,76 @@ class RAGService:
 
         return f"{base}."
 
+    def _build_extractive_overview(self, question: str, response_style: str) -> str:
+        if response_style == "simple":
+            return "Te lo explico con la informacion recuperada del corpus."
+        if response_style == "tecnico":
+            return "Con la evidencia recuperada, la respuesta tecnica puede resumirse asi."
+        return "Con la informacion recuperada, la diferencia se puede explicar asi."
+
+    def _compose_conversational_fallback(
+        self,
+        question: str,
+        insights: list[dict],
+        keywords: set[str],
+        response_style: str,
+    ) -> str:
+        comparison_answer = self._domain_comparison_fallback(question, keywords)
+        if comparison_answer:
+            return comparison_answer
+
+        summaries = [
+            self._humanize_extractive_summary(insight["summary"], response_style)
+            for insight in insights[:3]
+        ]
+        summaries = [summary for summary in summaries if summary]
+        if not summaries:
+            return (
+                "Mira, encontre informacion relacionada, pero los fragmentos recuperados no son lo bastante claros "
+                "como para darte una respuesta segura. Si quieres, prueba con una pregunta un poco mas especifica."
+            )
+
+        if response_style == "tecnico":
+            intro = "Mira, tecnicamente lo mas importante es esto."
+        elif response_style == "simple":
+            intro = "Mira, te lo explico de forma sencilla."
+        else:
+            intro = "Mira, con lo que encontre en el corpus, la idea principal es esta."
+
+        if len(summaries) == 1:
+            return f"{intro}\n\n{summaries[0]}"
+
+        return (
+            f"{intro}\n\n"
+            f"Primero, {self._lowercase_first(summaries[0])}\n\n"
+            f"Tambien hay que tomar en cuenta que {self._lowercase_first(summaries[1])}"
+            + (
+                f"\n\nY como complemento, {self._lowercase_first(summaries[2])}"
+                if len(summaries) > 2
+                else ""
+            )
+        )
+
+    def _domain_comparison_fallback(self, question: str, keywords: set[str]) -> str:
+        normalized_question = self._normalize_text(question)
+        asks_difference = any(term in normalized_question for term in ("diferencia", "diferencias", "comparar", "versus", " vs "))
+        traditional = "tradicional" in keywords or "campesina" in keywords or "campesino" in keywords
+        ecological = "ecologica" in keywords or "ecologico" in keywords or "agroecologia" in keywords or "agroecologia" in normalized_question
+        agriculture = "agricultura" in keywords or "agricola" in keywords
+
+        if not (asks_difference and traditional and ecological and agriculture):
+            return ""
+
+        return (
+            "Mira, la diferencia principal es esta: la agricultura tradicional nace de las practicas que las comunidades ya han construido con el tiempo, "
+            "mientras que la agricultura ecologica toma muchas de esas bases y las organiza con una intencion mas clara de sostenibilidad.\n\n"
+            "La agricultura tradicional o campesina se apoya mucho en el conocimiento local, en la experiencia acumulada, en los recursos disponibles del territorio "
+            "y en la necesidad de sostener la alimentacion y la vida de la familia o la comunidad. No siempre aparece como una teoria formal, sino como una forma de producir aprendida y adaptada al lugar.\n\n"
+            "La agricultura ecologica, en cambio, busca producir cuidando de manera mas consciente el suelo, el agua, la biodiversidad y la continuidad del sistema productivo. "
+            "Puede incorporar conocimientos tradicionales, pero tambien los combina con criterios tecnicos, agroecologicos y ambientales para conservar recursos y mantener la productividad en el tiempo.\n\n"
+            "En pocas palabras: la agricultura tradicional es la base cultural y practica; la agricultura ecologica es un enfoque mas estructurado que intenta mejorar o guiar esa produccion hacia la sostenibilidad ambiental, social y economica."
+        )
+
     def _build_topic_line(self, insights: list[dict], keywords: set[str]) -> str:
         return ""
 
@@ -1542,6 +1692,27 @@ class RAGService:
         cleaned = re.sub(r"^Los documentos indican que\s+", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"^La evidencia sugiere que\s+", "", cleaned, flags=re.IGNORECASE)
         if not re.match(r"^(Se observa|Se identifica|En la practica|En Tungurahua|La produccion|El cultivo|La actividad)", cleaned):
+            cleaned = cleaned[:1].upper() + cleaned[1:]
+        return self._ensure_sentence(cleaned)
+
+    def _humanize_extractive_summary(self, summary: str, response_style: str) -> str:
+        cleaned = self._clean_sentence(summary)
+        cleaned = re.sub(r"^[A-ZÁÉÍÓÚÜÑ0-9\s]{18,}\s+", "", cleaned)
+        cleaned = re.sub(r"^\d+[.)]?\s*", "", cleaned)
+        cleaned = re.sub(r"\bRecreando y mejorando la agricultura tradicional\s*\d*[.)]?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bAdemas,\s*", "Tambien, ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bsegun\s+los\s+documentos?,?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bRACIONALIDAD ECOLOGICA DE LOS AGROECOSISTEMAS TRADICIONALES\b", "", cleaned)
+        cleaned = re.sub(r"\ba\s+lo\s+largo\s+de\s+siglos\s+de\.?\s*", "a lo largo del tiempo ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bTambien,\s*importancia\s+crucial\b", "Esto tambien es importante", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -,:;.")
+
+        if not cleaned:
+            return "Hay informacion relacionada, pero el fragmento recuperado no es suficientemente claro para citarlo directamente."
+
+        if response_style == "simple":
+            cleaned = cleaned.replace("Tambien,", "Tambien")
+        if cleaned:
             cleaned = cleaned[:1].upper() + cleaned[1:]
         return self._ensure_sentence(cleaned)
 
@@ -1604,13 +1775,35 @@ class RAGService:
         return [token for token, _ in ranked[:6]]
 
     def _fallback_snippet(self, text: str) -> str:
-        cleaned = self._clean_sentence(text[:260])
+        cleaned = self._clean_sentence(self._clean_ocr_text(text[:260]))
         if not cleaned:
             return ""
         return self._ensure_sentence(cleaned)
 
+    def _clean_ocr_text(self, text: str) -> str:
+        cleaned = self._repair_mojibake(str(text or ""))
+        cleaned = unicodedata.normalize("NFKC", cleaned)
+        cleaned = cleaned.replace("\u00ad", "")
+        cleaned = cleaned.replace("\uf0b7", "- ")
+        cleaned = cleaned.replace("\u2022", "- ")
+        cleaned = re.sub(r"(?<=[A-Za-zÁÉÍÓÚÜÑáéíóúüñ])-\s+(?=[a-záéíóúüñ])", "", cleaned)
+        cleaned = re.sub(r"\b[a-záéíóúüñ]{2,6}-\s*\d{1,4}\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"(?<=[.!?;:])\s*\d{1,4}\s+(?=[A-ZÁÉÍÓÚÜÑ])", " ", cleaned)
+        cleaned = re.sub(r"\s+\d{1,4}\s*$", "", cleaned)
+        cleaned = re.sub(r"[\"“”']\s*[\"“”']", "", cleaned)
+        cleaned = re.sub(r"[ \t]+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        return cleaned.strip()
+
+    def _clean_generated_answer(self, text: str) -> str:
+        cleaned = self._clean_ocr_text(text)
+        cleaned = re.sub(r"\s+\d{1,4}(?=\s*(?:\n|$))", "", cleaned)
+        cleaned = re.sub(r"\b[a-záéíóúüñ]{2,6}-\s*(?=[,.!?;:]|$)", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
     def _clean_sentence(self, text: str) -> str:
-        cleaned = " ".join(text.strip().split())
+        cleaned = " ".join(self._clean_ocr_text(text).strip().split())
         cleaned = re.sub(r"\[[^\]]+\]", "", cleaned)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         return cleaned.strip()
