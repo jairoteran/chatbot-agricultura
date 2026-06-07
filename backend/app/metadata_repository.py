@@ -10,6 +10,7 @@ from app.metadata_models import (
     DocumentRecord,
     ReindexJobRecord,
     RuntimeStateRecord,
+    stable_document_id,
     utc_now_iso,
 )
 from app.settings import AppSettings
@@ -325,11 +326,17 @@ class FirestoreMetadataRepository:
     ) -> None:
         documents = self._documents_collection()
         analysis_by_path = corpus_analysis or {}
+        existing_by_path = {
+            record.relative_path: record
+            for record in self.list_document_records()
+            if record.relative_path
+        }
         for item in manifest.files:
             storage_path = self.cloud_layout.document_blob_path(item.relative_path)
             analysis = analysis_by_path.get(item.relative_path, {})
+            document_id = stable_document_id(item.relative_path)
             record = DocumentRecord(
-                document_id=item.fingerprint[:24] or item.relative_path.replace("/", "_"),
+                document_id=document_id,
                 file_name=item.file_name,
                 relative_path=item.relative_path,
                 storage_path=storage_path if self.settings.uses_cloud_documents else f"local:{item.relative_path}",
@@ -341,9 +348,29 @@ class FirestoreMetadataRepository:
                 key_terms=analysis.get("key_terms", []),
                 nlp_analyzer=analysis.get("nlp_analyzer", ""),
             )
+            previous = existing_by_path.get(item.relative_path)
+            if previous is not None and previous.document_id and previous.document_id != document_id:
+                documents.document(previous.document_id).delete()
             documents.document(record.document_id).set(record.to_dict(), merge=True)
 
     def upsert_document_record(self, record: DocumentRecord) -> None:
+        canonical_id = stable_document_id(record.relative_path)
+        if record.document_id != canonical_id:
+            record = DocumentRecord(
+                document_id=canonical_id,
+                file_name=record.file_name,
+                relative_path=record.relative_path,
+                storage_path=record.storage_path,
+                fingerprint=record.fingerprint,
+                size=record.size,
+                status=record.status,
+                topics=record.topics,
+                entities=record.entities,
+                key_terms=record.key_terms,
+                nlp_analyzer=record.nlp_analyzer,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
         self._documents_collection().document(record.document_id).set(record.to_dict(), merge=True)
 
     def delete_document_record(self, relative_path: str) -> None:
@@ -352,11 +379,14 @@ class FirestoreMetadataRepository:
             snapshot.reference.delete()
 
     def list_document_records(self) -> list[DocumentRecord]:
-        records: list[DocumentRecord] = []
+        records_by_path: dict[str, DocumentRecord] = {}
         for snapshot in self._documents_collection().stream():
             payload = snapshot.to_dict() or {}
-            records.append(DocumentRecord.from_dict(payload))
-        return sorted(records, key=lambda item: item.relative_path)
+            record = DocumentRecord.from_dict(payload)
+            current = records_by_path.get(record.relative_path)
+            if current is None or record.updated_at >= current.updated_at:
+                records_by_path[record.relative_path] = record
+        return sorted(records_by_path.values(), key=lambda item: item.relative_path)
 
     def start_reindex_job(self, trigger: str, source: str, *, total_documents: int = 0) -> str:
         job_id = f"job-{uuid4().hex[:16]}"

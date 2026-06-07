@@ -514,3 +514,31 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: `frontend/src/App.jsx` reemplazo la lista hardcodeada por las preguntas frecuentes reales y actualiza la sugerencia visible despues de cada nueva consulta.
 - Resultado: `correcto`
 - Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-06
+
+- Tipo: `avance`
+- Contexto: en cloud la interfaz podia quedarse demasiado tiempo en `Preparando sistema` y `Verificando backend...` al entrar a la pagina.
+- Evidencia: `backend/app/main.py` fue ajustado para que la inicializacion del servicio en `cloud-run` tambien arranque en segundo plano, en lugar de bloquear la primera consulta a `/health` mientras se prepara el RAG.
+- Evidencia: con este cambio, el frontend puede recibir antes un estado de `checking` real y seguir refrescando hasta que el backend quede listo, reduciendo la sensacion de congelamiento en la carga inicial.
+- Resultado: `correcto`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-07
+
+- Tipo: `avance`
+- Contexto: aun despues del cambio anterior, el backend cloud podia quedarse atascado en `Configurando el backend de embeddings...` durante demasiado tiempo.
+- Evidencia: `backend/app/rag_service.py` ahora envuelve la carga de `sentence-transformers/all-MiniLM-L6-v2` con un timeout configurable (`EMBEDDING_INIT_TIMEOUT_SECONDS`).
+- Evidencia: si la inicializacion de embeddings tarda demasiado en cloud, el servicio deja de esperar indefinidamente y arranca en `modo rapido` con fallback lexical, evitando que la UI quede atrapada en el estado de preparacion.
+- Evidencia: `backend/app/settings.py` expone el nuevo valor de configuracion para poder afinarlo por entorno.
+- Resultado: `correcto`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-07
+
+- Tipo: `error`
+- Contexto: en cloud, varios documentos seguian apareciendo como `Pendiente de indexar` incluso despues de ejecutar el reindexado manual, y sus contenidos no entraban al flujo de consulta.
+- Evidencia: el problema estaba en que los metadatos documentales se identificaban por fingerprint, lo que podia generar registros duplicados del mismo `relative_path` en Firestore entre la subida y el reindexado.
+- Evidencia: `backend/app/metadata_models.py`, `backend/app/main.py` y `backend/app/metadata_repository.py` fueron corregidos para usar un `document_id` estable por `relative_path`, deduplicar registros previos y conservar solo el estado mas reciente por archivo.
+- Resultado: `corregido en codigo`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`

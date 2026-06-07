@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha1
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -18,6 +19,13 @@ DOCUMENT_STATUSES = {
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def stable_document_id(relative_path: str) -> str:
+    normalized = str(relative_path or "").strip().lower().replace("\\", "/")
+    if not normalized:
+        return ""
+    return f"doc-{sha1(normalized.encode('utf-8')).hexdigest()[:24]}"
 
 
 def normalize_document_status(status: str) -> str:

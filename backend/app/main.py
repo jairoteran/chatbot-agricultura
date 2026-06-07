@@ -17,6 +17,7 @@ from app.admin_auth import (
 from app.cloud_layout import get_cloud_layout
 from app.corpus_analyzer import inspect_uploaded_pdf
 from app.document_repository import create_document_repository
+from app.index_repository import create_index_repository
 from app.metadata_repository import create_metadata_repository
 from app.rag_service import RAGService
 from app.settings import get_settings
@@ -37,12 +38,13 @@ from app.schemas import (
     HealthResponse,
     ReindexResponse,
 )
-from app.metadata_models import DOCUMENT_STATUS_PENDING_INDEX, DocumentRecord
+from app.metadata_models import DOCUMENT_STATUS_PENDING_INDEX, DocumentRecord, stable_document_id
 
 settings = get_settings()
 cloud_layout = get_cloud_layout(settings)
 document_repository = create_document_repository(settings, cloud_layout)
 metadata_repository = create_metadata_repository(settings, cloud_layout)
+index_repository = create_index_repository(settings, cloud_layout)
 
 
 def _allowed_origins() -> list[str]:
@@ -119,18 +121,35 @@ def require_admin_session(authorization: str | None = Header(default=None)) -> A
     )
 
 
-def _document_record_payload(item, metadata: DocumentRecord | None = None) -> AdminDocumentRecord:
+def _document_record_payload(
+    item,
+    metadata: DocumentRecord | None = None,
+    indexed_paths: set[str] | None = None,
+) -> AdminDocumentRecord:
+    indexed_paths = indexed_paths or set()
+    status = metadata.status if metadata is not None else DOCUMENT_STATUS_PENDING_INDEX
+    if item.relative_path in indexed_paths:
+        status = "indexed"
+
     return AdminDocumentRecord(
         file_name=item.file_name,
         relative_path=item.relative_path,
         size=item.size,
         fingerprint=item.fingerprint,
-        status=metadata.status if metadata is not None else DOCUMENT_STATUS_PENDING_INDEX,
+        status=status,
         topics=metadata.topics if metadata is not None else [],
         entities=metadata.entities if metadata is not None else [],
         key_terms=metadata.key_terms if metadata is not None else [],
         nlp_analyzer=metadata.nlp_analyzer if metadata is not None else "",
     )
+
+
+def _active_indexed_paths() -> set[str]:
+    try:
+        materialized = index_repository.prepare_runtime_storage(default_embed_model="")
+    except Exception:
+        return set()
+    return {item.relative_path for item in materialized.manifest.files if item.relative_path}
 
 
 def _document_storage_path(relative_path: str) -> str:
@@ -149,7 +168,7 @@ def _fingerprint_bytes(content: bytes) -> str:
 
 def _build_document_record_from_analysis(item, content: bytes, analysis: dict) -> DocumentRecord:
     return DocumentRecord(
-        document_id=(item.fingerprint or _fingerprint_bytes(content))[:24],
+        document_id=stable_document_id(item.relative_path),
         file_name=item.file_name,
         relative_path=item.relative_path,
         storage_path=_document_storage_path(item.relative_path),
@@ -271,15 +290,12 @@ def ensure_service_initializing(force_rebuild: bool = False) -> None:
     if rag_service is not None and not force_rebuild:
         return
 
-    if settings.deployment_target == "cloud-run":
-        with init_lock:
-            if rag_service is not None and not force_rebuild:
-                return
-            initialize_service(force_rebuild=force_rebuild)
-        return
-
     with init_lock:
-        if init_thread is not None and init_thread.is_alive():
+        if init_thread is not None and init_thread.is_alive() and not force_rebuild:
+            return
+
+        if force_rebuild:
+            initialize_service(force_rebuild=True)
             return
 
         init_thread = threading.Thread(
@@ -292,8 +308,6 @@ def ensure_service_initializing(force_rebuild: bool = False) -> None:
 
 @app.on_event("startup")
 def startup_event() -> None:
-    if settings.deployment_target == "cloud-run":
-        return
     ensure_service_initializing(force_rebuild=False)
 
 
@@ -364,12 +378,20 @@ def get_admin_session(session: AdminSessionResponse = Depends(require_admin_sess
 @app.get("/admin/documents", response_model=AdminDocumentListResponse)
 def list_admin_documents(_: AdminSessionResponse = Depends(require_admin_session)) -> AdminDocumentListResponse:
     records = document_repository.list_pdf_files()
+    indexed_paths = _active_indexed_paths()
     metadata_by_path = {
         item.relative_path: item
         for item in metadata_repository.list_document_records()
     }
     return AdminDocumentListResponse(
-        documents=[_document_record_payload(item, metadata_by_path.get(item.relative_path)) for item in records],
+        documents=[
+            _document_record_payload(
+                item,
+                metadata_by_path.get(item.relative_path),
+                indexed_paths=indexed_paths,
+            )
+            for item in records
+        ],
         total_documents=len(records),
         source=document_repository.describe_source(),
     )

@@ -69,6 +69,9 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se ajusto el mensaje inicial del chat publico para que no asuma ni mencione una carga previa de documentos
 - Se eliminaron menciones al `corpus` dentro del tono visible de las respuestas del chat y se reforzo un estilo mas conversacional, directo y natural
 - Se volvieron dinamicas las `Preguntas frecuentes`, tomando como base las consultas reales mas repetidas y persistiendo ese ranking en el estado runtime del backend
+- Se movio tambien el arranque de cloud a inicializacion en segundo plano para que `/health` responda antes y la UI no quede tanto tiempo bloqueada en `Preparando sistema`
+- Se agrego un timeout configurable para la carga de embeddings (`EMBEDDING_INIT_TIMEOUT_SECONDS`), permitiendo que cloud arranque en modo rapido si Hugging Face tarda demasiado en inicializarse
+- Se estabilizo el `document_id` de metadatos por `relative_path` para evitar registros duplicados en Firestore y corregir casos donde un PDF seguia apareciendo como `pending_index` despues del reindexado cloud
 
 ## En progreso
 

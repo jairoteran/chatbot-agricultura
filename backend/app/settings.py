@@ -84,6 +84,7 @@ class AppSettings:
     gemini_model: str
     gemini_fallback_model: str
     llm_timeout_seconds: float
+    embedding_init_timeout_seconds: float
     openai_model: str
     allow_runtime_reindex: bool
     enable_vector_retrieval: bool
@@ -156,6 +157,7 @@ def get_settings() -> AppSettings:
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
         gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash",
         llm_timeout_seconds=max(0.5, _env_float("LLM_TIMEOUT_SECONDS", 2.2)),
+        embedding_init_timeout_seconds=max(5.0, _env_float("EMBEDDING_INIT_TIMEOUT_SECONDS", 18.0)),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini",
         allow_runtime_reindex=allow_runtime_reindex,
         enable_vector_retrieval=_env_flag("ENABLE_VECTOR_RETRIEVAL", default=True),

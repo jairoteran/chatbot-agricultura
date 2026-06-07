@@ -27,6 +27,7 @@ OPENAI_MODEL = settings.openai_model
 GEMINI_MODEL = settings.gemini_model
 GEMINI_FALLBACK_MODEL = settings.gemini_fallback_model
 LLM_TIMEOUT_SECONDS = settings.llm_timeout_seconds
+EMBEDDING_INIT_TIMEOUT_SECONDS = settings.embedding_init_timeout_seconds
 TOP_K = 4
 SIMILARITY_THRESHOLD = 0.42
 MAX_RESPONSE_EVIDENCE = 3
@@ -248,6 +249,7 @@ class RAGService:
         self.embed_model_name = EMBED_MODEL if self._should_prepare_vector_backend() else "lexical-only"
         self._manifest_cache: dict | None = None
         self._manifest_cache_signature: tuple[tuple[str, int, int], ...] | None = None
+        self._loaded_manifest_signature: tuple[tuple[str, int, str], ...] | None = None
         self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         self.last_interaction_label = "Sin consultas"
         self.last_response_ms = 0
@@ -353,10 +355,24 @@ class RAGService:
             return
 
         try:
-            from llama_index.core import Settings
-            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(self._load_huggingface_embedding)
+            try:
+                embed_model = future.result(timeout=EMBEDDING_INIT_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                future.cancel()
+                raise TimeoutError(
+                    f"La carga del modelo de embeddings supero el limite de {EMBEDDING_INIT_TIMEOUT_SECONDS:.1f}s."
+                ) from exc
+            finally:
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    executor.shutdown(wait=False)
 
-            Settings.embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
+            from llama_index.core import Settings
+
+            Settings.embed_model = embed_model
             self.vector_backend_ready = True
             self.embed_model_name = EMBED_MODEL
         except Exception as exc:
@@ -368,6 +384,16 @@ class RAGService:
                     "Si es la primera ejecucion, verifica tu conexion a internet para descargar el modelo "
                     f"'{EMBED_MODEL}'. Detalle original: {exc}"
                 ) from exc
+            self._report_progress(
+                26,
+                "embedding-fallback",
+                "El modelo de embeddings esta tardando demasiado. Se iniciara el servicio en modo rapido.",
+            )
+
+    def _load_huggingface_embedding(self):
+        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+        return HuggingFaceEmbedding(model_name=EMBED_MODEL)
 
     def _ensure_embeddings_ready(self, *, force: bool = False) -> None:
         if self.vector_backend_ready or not self._should_prepare_vector_backend(force=force):
@@ -417,6 +443,7 @@ class RAGService:
             self.index_stale = False
             self.index_detail = "Servicio listo"
             self.last_index_source = "chunk-cache"
+            self._loaded_manifest_signature = self._manifest_signature(materialized.manifest)
             return None
 
         if not current_manifest.files:
@@ -428,6 +455,7 @@ class RAGService:
                     self.indexed_files = [item.file_name for item in materialized.manifest.files]
                 self.index_stale = False
                 self.index_detail = "Servicio listo"
+                self._loaded_manifest_signature = self._manifest_signature(materialized.manifest)
                 return None
 
             raise RuntimeError(
@@ -443,6 +471,7 @@ class RAGService:
             self.index_stale = False
             self.index_detail = "Servicio listo"
             self.last_index_source = "storage"
+            self._loaded_manifest_signature = self._manifest_signature(stored_manifest)
             return load_index_from_storage(storage_context)
 
         if self.deployment_mode != "local" and not self.allow_reindex and not force_rebuild:
@@ -454,6 +483,7 @@ class RAGService:
                     "Reconstruye backend/storage localmente y vuelve a desplegar."
                 )
                 self.last_index_source = "chunk-cache"
+                self._loaded_manifest_signature = self._manifest_signature(materialized.manifest)
                 return None
 
             raise RuntimeError(
@@ -519,6 +549,7 @@ class RAGService:
         )
         self.runtime_state = metadata_repository.get_runtime_state()
         self.runtime_storage_dir = index_repository.get_runtime_storage_dir()
+        self._loaded_manifest_signature = self._manifest_signature(current_manifest)
         return index
 
     def _load_documents(self, manifest_files) -> list:
@@ -652,9 +683,16 @@ class RAGService:
 
         return True
 
+    def _manifest_signature(self, manifest: IndexManifest) -> tuple[tuple[str, int, str], ...]:
+        return tuple(
+            (item.relative_path, int(item.size), item.fingerprint)
+            for item in sorted(manifest.files, key=lambda entry: entry.relative_path)
+        )
+
     def _refresh_index_if_needed(self) -> None:
         current_manifest = self._build_manifest()
-        stored_manifest = self._read_manifest()
+        materialized = index_repository.prepare_runtime_storage(self.embed_model_name)
+        stored_manifest = materialized.manifest
         has_changes = not self._manifests_equivalent(stored_manifest, current_manifest)
 
         current_files = self._manifest_file_names(current_manifest)
@@ -662,6 +700,22 @@ class RAGService:
         self.indexed_files = current_files
 
         if not has_changes:
+            stored_signature = self._manifest_signature(stored_manifest)
+            if stored_signature != self._loaded_manifest_signature:
+                self.chunk_cache = materialized.chunk_cache
+                self.runtime_storage_dir = materialized.storage_dir
+                if self.vector_backend_ready and index_repository.has_required_storage_files():
+                    try:
+                        from llama_index.core import StorageContext, load_index_from_storage
+
+                        storage_context = StorageContext.from_defaults(persist_dir=str(self.runtime_storage_dir))
+                        self.index = load_index_from_storage(storage_context)
+                        self.retriever = self.index.as_retriever(similarity_top_k=TOP_K)
+                    except Exception:
+                        self.index = None
+                        self.retriever = None
+                self.last_index_source = materialized.source_label
+                self._loaded_manifest_signature = stored_signature
             self.index_stale = False
             self.index_detail = "Servicio listo"
             return
@@ -736,9 +790,15 @@ class RAGService:
             and index_repository.has_required_storage_files()
         ):
             self.chunk_cache = self._read_chunk_cache()
+            metadata_repository.sync_documents(
+                current_manifest,
+                settings.documents_prefix,
+                corpus_analysis=self._build_corpus_analysis(),
+            )
             self.index_stale = False
             self.index_detail = "El indice ya estaba actualizado. No fue necesario reconstruirlo."
             self.last_index_source = "storage"
+            self._loaded_manifest_signature = self._manifest_signature(current_manifest)
             self.runtime_state = metadata_repository.get_runtime_state()
             return {
                 "status": "ok",
