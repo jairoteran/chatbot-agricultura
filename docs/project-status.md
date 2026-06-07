@@ -58,6 +58,7 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se ajusto el lenguaje visible del panel `/gestion` para presentarlo como `gestion documental` basada en cuentas autorizadas, evitando describirlo como un rol unico de administrador
 - Se agrego un modelo documental mas claro para el corpus con estados como `pending_index` e `indexed`, mas metadatos NLP (`topics`, `entities`, `key_terms`, `nlp_analyzer`)
 - Se integro una capa de analisis de corpus con `spaCy` y fallback de dominio para enriquecer documentos durante el reindexado sin depender obligatoriamente de un modelo externo instalado
+- Se incorporo un filtro automatico en la subida de PDFs para aceptar solo documentos con suficiente relacion tematica, guardar metadatos NLP desde el ingreso y devolver mensajes de rechazo mas amigables en `/gestion`
 - Se decidio no integrar `NLTK` en runtime por ahora, porque la limpieza/tokenizacion queda cubierta por `spaCy`, reglas propias y embeddings
 - Se separo `ENABLE_VECTOR_RETRIEVAL` de `ALLOW_RUNTIME_REINDEX` para que cloud pueda usar el indice vectorial publicado sin permitir rebuilds pesados dentro de la API web
 - Se agrego trazabilidad de generacion (`last_generation_status`, `last_generation_error`) para diagnosticar cuando cloud cae al fallback extractivo en lugar de responder con Gemini
@@ -66,6 +67,8 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se amplio el timeout del proxy Nginx del frontend en Cloud Run para evitar `504 Gateway Timeout` durante respuestas generativas lentas
 - Se agrego `LLM_TIMEOUT_SECONDS=2.2` para cortar la espera de Gemini y mantener la API orientada a respuestas menores a 3 segundos, usando fallback limpio si el modelo no responde a tiempo
 - Se ajusto el mensaje inicial del chat publico para que no asuma ni mencione una carga previa de documentos
+- Se eliminaron menciones al `corpus` dentro del tono visible de las respuestas del chat y se reforzo un estilo mas conversacional, directo y natural
+- Se volvieron dinamicas las `Preguntas frecuentes`, tomando como base las consultas reales mas repetidas y persistiendo ese ranking en el estado runtime del backend
 
 ## En progreso
 

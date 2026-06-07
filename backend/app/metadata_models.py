@@ -31,6 +31,24 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _question_frequency_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list | tuple):
+        return []
+
+    cleaned: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        count = int(item.get("count", 0) or 0)
+        if not question or count <= 0:
+            continue
+        cleaned.append({"question": question, "count": count})
+
+    cleaned.sort(key=lambda entry: (-entry["count"], entry["question"]))
+    return cleaned[:20]
+
+
 @dataclass(frozen=True)
 class DocumentRecord:
     document_id: str
@@ -131,6 +149,8 @@ class RuntimeStateRecord:
     reindex_detail: str = ""
     reindex_total_documents: int = 0
     reindex_processed_documents: int = 0
+    frequent_questions: list[str] = field(default_factory=list)
+    question_frequencies: list[dict[str, Any]] = field(default_factory=list)
     updated_at: str = field(default_factory=utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,6 +167,8 @@ class RuntimeStateRecord:
             "reindex_detail": self.reindex_detail,
             "reindex_total_documents": self.reindex_total_documents,
             "reindex_processed_documents": self.reindex_processed_documents,
+            "frequent_questions": self.frequent_questions,
+            "question_frequencies": self.question_frequencies,
             "updated_at": self.updated_at,
         }
 
@@ -165,5 +187,7 @@ class RuntimeStateRecord:
             reindex_detail=str(payload.get("reindex_detail", "")),
             reindex_total_documents=int(payload.get("reindex_total_documents", 0) or 0),
             reindex_processed_documents=int(payload.get("reindex_processed_documents", 0) or 0),
+            frequent_questions=_string_list(payload.get("frequent_questions", [])),
+            question_frequencies=_question_frequency_list(payload.get("question_frequencies", [])),
             updated_at=str(payload.get("updated_at", "")) or utc_now_iso(),
         )

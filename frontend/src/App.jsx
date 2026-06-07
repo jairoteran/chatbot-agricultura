@@ -62,7 +62,7 @@ const responseStyleOptions = [
   { value: "tecnico", label: "Tecnico" },
 ];
 
-const suggestedQuestions = [
+const defaultSuggestedQuestions = [
   "¿Qué dice el manual sobre agricultura ecológica?",
   "Resume el panorama histórico de 1999",
   "¿Diferencia entre agricultura tradicional y ecológica?",
@@ -91,6 +91,7 @@ const initialBackendStatus = {
   runtime_reindex_detail: "",
   runtime_reindex_total_documents: 0,
   runtime_reindex_processed_documents: 0,
+  frequent_questions: [],
   last_interaction_label: "Sin consultas",
   last_response_ms: 0,
   last_input_tokens: 0,
@@ -195,6 +196,46 @@ function adminAuthHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
   };
+}
+
+function mergeFrequentQuestions(existingQuestions, latestQuestion) {
+  const cleanedLatest = (latestQuestion || "").trim();
+  const base = Array.isArray(existingQuestions) ? existingQuestions.filter(Boolean) : [];
+  if (!cleanedLatest) {
+    return base.length ? base : defaultSuggestedQuestions;
+  }
+
+  const normalizedLatest = cleanedLatest.toLowerCase();
+  const deduped = [
+    cleanedLatest,
+    ...base.filter((question) => question.trim().toLowerCase() !== normalizedLatest),
+  ];
+  return deduped.slice(0, 3);
+}
+
+function formatDocumentUploadErrorMessage(message) {
+  const normalizedMessage = (message || "").trim();
+  if (!normalizedMessage) {
+    return "No fue posible subir el documento.";
+  }
+
+  if (normalizedMessage.includes("No pude leer suficiente contenido util dentro del PDF")) {
+    return (
+      "No pude leer bien el contenido del PDF. Prueba con un archivo mas claro, con texto seleccionable o con mejor calidad."
+    );
+  }
+
+  if (
+    normalizedMessage.includes("no encontre suficiente contenido relacionado con agricultura") ||
+    normalizedMessage.includes("No pude aceptar el documento automaticamente")
+  ) {
+    return (
+      "Revise el archivo, pero no encontre suficiente contenido relacionado con agricultura o saberes ancestrales. "
+      + "Si quieres, prueba con otro documento mas alineado con esos temas."
+    );
+  }
+
+  return normalizedMessage;
 }
 
 function loadGoogleIdentityScript() {
@@ -800,6 +841,7 @@ function PublicChatApp() {
       ]);
       setBackendStatus((currentStatus) => ({
         ...currentStatus,
+        frequent_questions: mergeFrequentQuestions(currentStatus?.frequent_questions, question),
         last_interaction_label: "Ultima respuesta",
         last_response_ms: payload.response_ms || 0,
         last_input_tokens: payload.input_tokens || 0,
@@ -898,6 +940,10 @@ function PublicChatApp() {
     textareaRef.current?.focus();
   }
 
+  const displayedSuggestedQuestions =
+    backendStatus?.frequent_questions?.length > 0
+      ? backendStatus.frequent_questions
+      : defaultSuggestedQuestions;
   const statusLabel = friendlyStatusLabel(currentBackendUiState);
   const backendStageText = backendStageLabel(
     backendStatus.init_stage,
@@ -967,67 +1013,9 @@ function PublicChatApp() {
           </div>
 
           <div className="sidebar-section">
-            <span className="status-card-label">Resumen rapido</span>
-            <div className="sidebar-mobile-summary">
-              <div className="toolbar-field sidebar-mobile-field">
-                <label className="summary-label" htmlFor="response-style-select-mobile">
-                  Estilo
-                </label>
-                <select
-                  id="response-style-select-mobile"
-                  className="summary-select toolbar-select"
-                  value={responseStyle}
-                  onChange={(event) => setResponseStyle(event.target.value)}
-                  disabled={isLoading || isSummarizing}
-                >
-                  {responseStyleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {indexedDocuments.length > 0 && (
-                <div className="toolbar-field toolbar-field-document sidebar-mobile-field">
-                  <label className="summary-label" htmlFor="document-summary-select-mobile">
-                    Documento
-                  </label>
-                  <select
-                    id="document-summary-select-mobile"
-                    className="summary-select toolbar-select"
-                    value={selectedDocument}
-                    onChange={(event) => setSelectedDocument(event.target.value)}
-                    disabled={!backendReady || isSummarizing}
-                  >
-                    {indexedDocuments.map((document) => (
-                      <option
-                        key={document.file_name}
-                        value={document.file_name}
-                        title={document.display_title || document.file_name}
-                      >
-                        {compactLabel(document.display_title || document.file_name)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <button
-                className="secondary-button sidebar-mobile-summary-button"
-                type="button"
-                onClick={handleSummarizeDocument}
-                disabled={!backendReady || !selectedDocument || isSummarizing}
-              >
-                {isSummarizing ? "Resumiendo..." : "Resumir"}
-              </button>
-            </div>
-          </div>
-
-          <div className="sidebar-section">
             <span className="status-card-label">Preguntas frecuentes</span>
             <div className="sidebar-action-list">
-              {suggestedQuestions.map((question) => (
+              {displayedSuggestedQuestions.map((question) => (
                 <button
                   key={question}
                   type="button"
@@ -1681,7 +1669,7 @@ function AdminApp() {
         setDocumentActionMessage(payload.detail || "Documento subido correctamente.");
       }
     } catch (error) {
-      setErrorMessage(error.message || "No fue posible subir el documento.");
+      setErrorMessage(formatDocumentUploadErrorMessage(error.message));
     } finally {
       setIsUploadingDocument(false);
       setUploadProgress(0);

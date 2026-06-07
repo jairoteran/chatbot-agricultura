@@ -15,6 +15,7 @@ from app.admin_auth import (
     verify_google_identity_token,
 )
 from app.cloud_layout import get_cloud_layout
+from app.corpus_analyzer import inspect_uploaded_pdf
 from app.document_repository import create_document_repository
 from app.metadata_repository import create_metadata_repository
 from app.rag_service import RAGService
@@ -144,6 +145,22 @@ def _fingerprint_bytes(content: bytes) -> str:
     digest = sha256()
     digest.update(content)
     return digest.hexdigest()
+
+
+def _build_document_record_from_analysis(item, content: bytes, analysis: dict) -> DocumentRecord:
+    return DocumentRecord(
+        document_id=(item.fingerprint or _fingerprint_bytes(content))[:24],
+        file_name=item.file_name,
+        relative_path=item.relative_path,
+        storage_path=_document_storage_path(item.relative_path),
+        fingerprint=item.fingerprint or _fingerprint_bytes(content),
+        size=item.size,
+        status=DOCUMENT_STATUS_PENDING_INDEX,
+        topics=analysis.get("topics", []),
+        entities=analysis.get("entities", []),
+        key_terms=analysis.get("key_terms", []),
+        nlp_analyzer=analysis.get("nlp_analyzer", ""),
+    )
 
 
 def _trigger_cloud_run_reindex_job() -> dict:
@@ -373,22 +390,20 @@ async def upload_admin_document(
     if not content:
         raise HTTPException(status_code=400, detail="El archivo PDF esta vacio.")
 
-    record = document_repository.upload_pdf(file_name, content)
-    metadata_repository.upsert_document_record(
-        DocumentRecord(
-            document_id=_fingerprint_bytes(content)[:24],
-            file_name=record.file_name,
-            relative_path=record.relative_path,
-            storage_path=_document_storage_path(record.relative_path),
-            fingerprint=record.fingerprint or _fingerprint_bytes(content),
-            size=record.size,
-            status=DOCUMENT_STATUS_PENDING_INDEX,
+    analysis = inspect_uploaded_pdf(file_name, content)
+    if not analysis.get("accepted"):
+        raise HTTPException(
+            status_code=400,
+            detail=analysis.get("detail") or "No pude aceptar el documento automaticamente.",
         )
-    )
+
+    record = document_repository.upload_pdf(file_name, content)
+    document_metadata = _build_document_record_from_analysis(record, content, analysis)
+    metadata_repository.upsert_document_record(document_metadata)
     return AdminDocumentMutationResponse(
         status="ok",
-        detail=f"Documento '{record.file_name}' subido correctamente.",
-        document=_document_record_payload(record),
+        detail=f"Documento '{record.file_name}' subido correctamente. {analysis.get('detail', '')}".strip(),
+        document=_document_record_payload(record, document_metadata),
     )
 
 
@@ -448,21 +463,33 @@ def complete_admin_document_upload(
             detail="No se encontro el documento recien subido en el almacenamiento configurado.",
         )
 
-    metadata_repository.upsert_document_record(
-        DocumentRecord(
-            document_id=(record.fingerprint or _fingerprint_bytes(record.file_name.encode("utf-8")))[:24],
-            file_name=record.file_name,
-            relative_path=record.relative_path,
-            storage_path=_document_storage_path(record.relative_path),
-            fingerprint=record.fingerprint,
-            size=record.size,
-            status=DOCUMENT_STATUS_PENDING_INDEX,
+    try:
+        content = document_repository.read_pdf_bytes(normalized_path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="No se pudo leer el documento recien subido para validarlo.",
         )
-    )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    analysis = inspect_uploaded_pdf(record.file_name, content)
+    if not analysis.get("accepted"):
+        try:
+            document_repository.delete_pdf(normalized_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail=analysis.get("detail") or "No pude aceptar el documento automaticamente.",
+        )
+
+    document_metadata = _build_document_record_from_analysis(record, content, analysis)
+    metadata_repository.upsert_document_record(document_metadata)
     return AdminDocumentMutationResponse(
         status="ok",
-        detail=f"Documento '{record.file_name}' subido correctamente.",
-        document=_document_record_payload(record),
+        detail=f"Documento '{record.file_name}' subido correctamente. {analysis.get('detail', '')}".strip(),
+        document=_document_record_payload(record, document_metadata),
     )
 
 

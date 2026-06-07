@@ -75,6 +75,7 @@ class HealthResponse(BaseModel):
     runtime_reindex_detail: str = ""
     runtime_reindex_total_documents: int = 0
     runtime_reindex_processed_documents: int = 0
+    frequent_questions: list[str] = Field(default_factory=list)
     last_interaction_label: str = "Sin consultas"
     last_response_ms: int = 0
     last_input_tokens: int = 0

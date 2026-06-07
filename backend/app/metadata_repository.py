@@ -14,6 +14,9 @@ from app.metadata_models import (
 )
 from app.settings import AppSettings
 
+MAX_TRACKED_QUESTIONS = 20
+MAX_VISIBLE_FREQUENT_QUESTIONS = 3
+
 
 class MetadataRepository(Protocol):
     def sync_documents(
@@ -75,6 +78,59 @@ class MetadataRepository(Protocol):
     def reconcile_runtime_success(self) -> None:
         ...
 
+    def record_question(self, question: str) -> None:
+        ...
+
+
+def _normalize_question_for_stats(question: str) -> str:
+    cleaned = " ".join(str(question or "").strip().split())
+    cleaned = cleaned.strip(" ¿?¡!.,;:")
+    return cleaned.lower()
+
+
+def _display_question_label(question: str) -> str:
+    cleaned = " ".join(str(question or "").strip().split())
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in "?!":
+        cleaned = f"{cleaned}?"
+    return cleaned[:1].upper() + cleaned[1:]
+
+
+def _updated_question_frequencies(current_stats: list[dict], question: str) -> tuple[list[dict], list[str]]:
+    normalized = _normalize_question_for_stats(question)
+    display_question = _display_question_label(question)
+    if not normalized or len(normalized) < 6 or not display_question:
+        return current_stats, [entry["question"] for entry in current_stats[:MAX_VISIBLE_FREQUENT_QUESTIONS]]
+
+    stats = [
+        {
+            "question": str(entry.get("question", "")).strip(),
+            "count": int(entry.get("count", 0) or 0),
+            "normalized": _normalize_question_for_stats(entry.get("question", "")),
+        }
+        for entry in current_stats
+        if str(entry.get("question", "")).strip() and int(entry.get("count", 0) or 0) > 0
+    ]
+
+    matched = False
+    for entry in stats:
+        if entry["normalized"] == normalized:
+            entry["count"] += 1
+            if len(display_question) > len(entry["question"]):
+                entry["question"] = display_question
+            matched = True
+            break
+
+    if not matched:
+        stats.append({"question": display_question, "count": 1, "normalized": normalized})
+
+    stats.sort(key=lambda entry: (-entry["count"], entry["question"]))
+    trimmed = [{"question": entry["question"], "count": entry["count"]} for entry in stats[:MAX_TRACKED_QUESTIONS]]
+    visible = [entry["question"] for entry in trimmed[:MAX_VISIBLE_FREQUENT_QUESTIONS]]
+    return trimmed, visible
+
 
 class NoopMetadataRepository:
     def __init__(self, settings: AppSettings) -> None:
@@ -125,6 +181,8 @@ class NoopMetadataRepository:
             reindex_detail=detail,
             reindex_total_documents=max(0, total_documents),
             reindex_processed_documents=max(0, processed_documents),
+            frequent_questions=self.runtime_state.frequent_questions,
+            question_frequencies=self.runtime_state.question_frequencies,
             updated_at=now,
         )
 
@@ -158,6 +216,8 @@ class NoopMetadataRepository:
                 if status == "success"
                 else self.runtime_state.reindex_processed_documents
             ),
+            frequent_questions=self.runtime_state.frequent_questions,
+            question_frequencies=self.runtime_state.question_frequencies,
             updated_at=now,
         )
 
@@ -194,6 +254,8 @@ class NoopMetadataRepository:
                 if status == "success"
                 else self.runtime_state.reindex_processed_documents
             ),
+            frequent_questions=self.runtime_state.frequent_questions,
+            question_frequencies=self.runtime_state.question_frequencies,
             updated_at=now,
         )
 
@@ -220,6 +282,32 @@ class NoopMetadataRepository:
             reindex_detail="Reindexado completado correctamente.",
             reindex_total_documents=self.runtime_state.reindex_total_documents,
             reindex_processed_documents=self.runtime_state.reindex_total_documents,
+            frequent_questions=self.runtime_state.frequent_questions,
+            question_frequencies=self.runtime_state.question_frequencies,
+            updated_at=now,
+        )
+
+    def record_question(self, question: str) -> None:
+        now = utc_now_iso()
+        question_frequencies, frequent_questions = _updated_question_frequencies(
+            self.runtime_state.question_frequencies,
+            question,
+        )
+        self.runtime_state = RuntimeStateRecord(
+            active_index_name=self.runtime_state.active_index_name,
+            active_index_source=self.runtime_state.active_index_source,
+            active_index_manifest_path=self.runtime_state.active_index_manifest_path,
+            last_successful_reindex=self.runtime_state.last_successful_reindex,
+            last_failed_reindex=self.runtime_state.last_failed_reindex,
+            last_reindex_status=self.runtime_state.last_reindex_status,
+            last_reindex_job_id=self.runtime_state.last_reindex_job_id,
+            reindex_progress=self.runtime_state.reindex_progress,
+            reindex_stage=self.runtime_state.reindex_stage,
+            reindex_detail=self.runtime_state.reindex_detail,
+            reindex_total_documents=self.runtime_state.reindex_total_documents,
+            reindex_processed_documents=self.runtime_state.reindex_processed_documents,
+            frequent_questions=frequent_questions,
+            question_frequencies=question_frequencies,
             updated_at=now,
         )
 
@@ -341,6 +429,8 @@ class FirestoreMetadataRepository:
                 reindex_detail=detail,
                 reindex_total_documents=max(0, total_documents),
                 reindex_processed_documents=max(0, processed_documents),
+                frequent_questions=current.frequent_questions,
+                question_frequencies=current.question_frequencies,
                 updated_at=now,
             ).to_dict(),
             merge=True,
@@ -393,6 +483,8 @@ class FirestoreMetadataRepository:
                 ),
                 reindex_total_documents=current.reindex_total_documents,
                 reindex_processed_documents=current.reindex_processed_documents,
+                frequent_questions=current.frequent_questions,
+                question_frequencies=current.question_frequencies,
                 updated_at=now,
             ).to_dict(),
             merge=True,
@@ -410,24 +502,27 @@ class FirestoreMetadataRepository:
         now = utc_now_iso()
         active_name = pointer.index_name if pointer is not None else self.settings.active_index_name
         manifest_path = pointer.manifest_path if pointer is not None else "local:manifest.json"
+        current = self.get_runtime_state()
         self._runtime_document().set(
             RuntimeStateRecord(
                 active_index_name=active_name,
                 active_index_source=source,
                 active_index_manifest_path=manifest_path,
-                last_successful_reindex=now if status == "success" else self.get_runtime_state().last_successful_reindex,
-                last_failed_reindex=self.get_runtime_state().last_failed_reindex,
+                last_successful_reindex=now if status == "success" else current.last_successful_reindex,
+                last_failed_reindex=current.last_failed_reindex,
                 last_reindex_status=status,
                 last_reindex_job_id=job_id,
-                reindex_progress=100 if status == "success" else self.get_runtime_state().reindex_progress,
-                reindex_stage="completed" if status == "success" else self.get_runtime_state().reindex_stage,
+                reindex_progress=100 if status == "success" else current.reindex_progress,
+                reindex_stage="completed" if status == "success" else current.reindex_stage,
                 reindex_detail=(
                     "Reindexado completado correctamente."
                     if status == "success"
-                    else self.get_runtime_state().reindex_detail
+                    else current.reindex_detail
                 ),
-                reindex_total_documents=self.get_runtime_state().reindex_total_documents,
-                reindex_processed_documents=self.get_runtime_state().reindex_processed_documents,
+                reindex_total_documents=current.reindex_total_documents,
+                reindex_processed_documents=current.reindex_processed_documents,
+                frequent_questions=current.frequent_questions,
+                question_frequencies=current.question_frequencies,
                 updated_at=now,
             ).to_dict(),
             merge=True,
@@ -465,7 +560,36 @@ class FirestoreMetadataRepository:
                 reindex_detail="Reindexado completado correctamente.",
                 reindex_total_documents=current.reindex_total_documents,
                 reindex_processed_documents=current.reindex_total_documents,
+                frequent_questions=current.frequent_questions,
+                question_frequencies=current.question_frequencies,
                 updated_at=now,
+            ).to_dict(),
+            merge=True,
+        )
+
+    def record_question(self, question: str) -> None:
+        current = self.get_runtime_state()
+        question_frequencies, frequent_questions = _updated_question_frequencies(
+            current.question_frequencies,
+            question,
+        )
+        self._runtime_document().set(
+            RuntimeStateRecord(
+                active_index_name=current.active_index_name,
+                active_index_source=current.active_index_source,
+                active_index_manifest_path=current.active_index_manifest_path,
+                last_successful_reindex=current.last_successful_reindex,
+                last_failed_reindex=current.last_failed_reindex,
+                last_reindex_status=current.last_reindex_status,
+                last_reindex_job_id=current.last_reindex_job_id,
+                reindex_progress=current.reindex_progress,
+                reindex_stage=current.reindex_stage,
+                reindex_detail=current.reindex_detail,
+                reindex_total_documents=current.reindex_total_documents,
+                reindex_processed_documents=current.reindex_processed_documents,
+                frequent_questions=frequent_questions,
+                question_frequencies=question_frequencies,
+                updated_at=utc_now_iso(),
             ).to_dict(),
             merge=True,
         )

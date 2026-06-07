@@ -35,6 +35,9 @@ class DocumentRepository(Protocol):
     def get_pdf_record(self, relative_path: str) -> IndexedFileRecord | None:
         ...
 
+    def read_pdf_bytes(self, relative_path: str) -> bytes:
+        ...
+
     def delete_pdf(self, relative_path: str) -> None:
         ...
 
@@ -111,6 +114,14 @@ class LocalDocumentRepository:
             size=stat.st_size,
             fingerprint=self._hash_file_contents(destination),
         )
+
+    def read_pdf_bytes(self, relative_path: str) -> bytes:
+        safe_relative = Path(relative_path)
+        destination = (self.data_dir / safe_relative).resolve()
+        data_root = self.data_dir.resolve()
+        if not str(destination).startswith(str(data_root)) or not destination.exists():
+            raise FileNotFoundError(relative_path)
+        return destination.read_bytes()
 
     def delete_pdf(self, relative_path: str) -> None:
         safe_relative = Path(relative_path)
@@ -221,6 +232,14 @@ class GcsDocumentRepository:
             size=int(blob.size or 0),
             fingerprint=self._blob_fingerprint(blob),
         )
+
+    def read_pdf_bytes(self, relative_path: str) -> bytes:
+        safe_name = Path(relative_path).name
+        blob_path = self.cloud_layout.document_blob_path(safe_name)
+        blob = self._client().bucket(self.bucket_name).blob(blob_path)
+        if not blob.exists():
+            raise FileNotFoundError(relative_path)
+        return blob.download_as_bytes()
 
     def delete_pdf(self, relative_path: str) -> None:
         safe_name = Path(relative_path).name

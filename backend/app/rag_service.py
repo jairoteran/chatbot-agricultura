@@ -165,7 +165,12 @@ RESPONSE_STYLE_GUIDANCE = {
         "llm_instruction": (
             "Usa un tono academico claro y ordenado, pero responde de forma directa y segura. "
             "No repitas frases como 'segun el documento' o 'los documentos indican' dentro de cada idea. "
-            "Deja que el respaldo documental viva en las fuentes del panel, no en el cuerpo de la respuesta."
+            "Deja que el respaldo documental viva en las fuentes del panel, no en el cuerpo de la respuesta. "
+            "Desarrolla la respuesta con contexto, relaciones entre ideas y una explicacion un poco mas amplia que una contestacion breve."
+        ),
+        "length_instruction": (
+            "Apunta a 3 o 4 parrafos breves bien desarrollados. Explica la idea principal, desarrolla sus matices "
+            "y cierra con una interpretacion util o implicacion relevante."
         ),
     },
     "simple": {
@@ -179,7 +184,11 @@ RESPONSE_STYLE_GUIDANCE = {
         "llm_instruction": (
             "Usa un tono sencillo, cercano y personalizado, como una conversacion de tu a tu. "
             "Responde con seguridad y naturalidad. Evita expresiones como 'el documento dice', "
-            "'en base al documento' o 'la evidencia indica' dentro del cuerpo de la respuesta."
+            "'en base al documento' o 'la evidencia indica' dentro del cuerpo de la respuesta. "
+            "No te quedes en una respuesta minima: explica un poco mas para que la persona entienda bien el tema."
+        ),
+        "length_instruction": (
+            "Apunta a 2 o 3 parrafos claros. Primero responde directo y luego amplia con ejemplos, consecuencias o aclaraciones utiles."
         ),
     },
     "tecnico": {
@@ -192,7 +201,11 @@ RESPONSE_STYLE_GUIDANCE = {
         ),
         "llm_instruction": (
             "Usa un tono tecnico y preciso, pero redacta de manera directa. "
-            "No desplaces la atencion al documento ni repitas frases como 'la evidencia recuperada' dentro de cada punto."
+            "No desplaces la atencion al documento ni repitas frases como 'la evidencia recuperada' dentro de cada punto. "
+            "Desarrolla la respuesta con criterios, condiciones, proceso y relaciones operativas cuando el tema lo permita."
+        ),
+        "length_instruction": (
+            "Apunta a 3 parrafos compactos pero sustanciosos. Prioriza procedimiento, criterios tecnicos, variables y efectos practicos."
         ),
     },
 }
@@ -700,6 +713,8 @@ class RAGService:
             "runtime_reindex_stage": self.runtime_state.reindex_stage,
             "runtime_reindex_detail": self.runtime_state.reindex_detail,
             "runtime_reindex_total_documents": self.runtime_state.reindex_total_documents,
+            "runtime_reindex_processed_documents": self.runtime_state.reindex_processed_documents,
+            "frequent_questions": self.runtime_state.frequent_questions,
             "last_interaction_label": self.last_interaction_label,
             "last_response_ms": self.last_response_ms,
             "last_input_tokens": self.last_input_tokens,
@@ -793,6 +808,8 @@ class RAGService:
             raise RuntimeError("El indice documental aun no esta listo.")
         if self.index_stale:
             raise RuntimeError(self.index_detail)
+        metadata_repository.record_question(question)
+        self.runtime_state = metadata_repository.get_runtime_state()
 
         small_talk_answer = self._small_talk_answer(question)
         if small_talk_answer:
@@ -1317,6 +1334,7 @@ class RAGService:
             "La evidencia puede contener ruido OCR: palabras cortadas, guiones raros, numeros de pagina o fragmentos como 'evo- 178'. "
             "No reproduzcas esos artefactos; reconstruye la idea en tus propias palabras.\n"
             f"{style_config['llm_instruction']}\n"
+            f"{style_config['length_instruction']}\n"
             "\n"
             "Historial reciente:\n"
             f"{conversation_text}\n\n"
@@ -1327,10 +1345,11 @@ class RAGService:
             "Instrucciones de salida:\n"
             "1. Responde de forma directa, natural y segura, como una conversacion uno a uno.\n"
             "2. No uses encabezados como Respuesta breve, Puntos clave, Conclusion, Resumen o similares.\n"
-            "3. Usa listas con guiones solo cuando realmente ayuden.\n"
-            "4. Si hay limites o ambiguedades, explicalos con naturalidad dentro de la respuesta.\n"
-            "5. No menciones de forma repetitiva que respondes en base a documentos. Las fuentes ya se mostraran aparte.\n"
-            "6. No incluyas numeros sueltos, codigos de pagina, palabras incompletas ni cortes con guion.\n"
+            "3. No respondas de forma demasiado corta salvo que la pregunta sea extremadamente simple.\n"
+            "4. Usa listas con guiones solo cuando realmente ayuden.\n"
+            "5. Si hay limites o ambiguedades, explicalos con naturalidad dentro de la respuesta.\n"
+            "6. No menciones de forma repetitiva que respondes en base a documentos. Las fuentes ya se mostraran aparte.\n"
+            "7. No incluyas numeros sueltos, codigos de pagina, palabras incompletas ni cortes con guion.\n"
         )
 
         try:
@@ -1597,10 +1616,10 @@ class RAGService:
 
     def _build_extractive_overview(self, question: str, response_style: str) -> str:
         if response_style == "simple":
-            return "Te lo explico con la informacion recuperada del corpus."
+            return "Te lo explico de forma clara con lo que encontre."
         if response_style == "tecnico":
-            return "Con la evidencia recuperada, la respuesta tecnica puede resumirse asi."
-        return "Con la informacion recuperada, la diferencia se puede explicar asi."
+            return "Tecnicamente, esto es lo mas importante."
+        return "Asi se entiende mejor la diferencia."
 
     def _compose_conversational_fallback(
         self,
@@ -1629,17 +1648,41 @@ class RAGService:
         elif response_style == "simple":
             intro = "Mira, te lo explico de forma sencilla."
         else:
-            intro = "Mira, con lo que encontre en el corpus, la idea principal es esta."
+            intro = "Mira, la idea principal es esta."
 
         if len(summaries) == 1:
             return f"{intro}\n\n{summaries[0]}"
 
+        if response_style == "simple":
+            return (
+                f"{intro}\n\n"
+                f"Primero, {self._lowercase_first(summaries[0])}\n\n"
+                f"Ademas, {self._lowercase_first(summaries[1])}"
+                + (
+                    f"\n\nEso tambien ayuda a entender que {self._lowercase_first(summaries[2])}"
+                    if len(summaries) > 2
+                    else ""
+                )
+            )
+
+        if response_style == "tecnico":
+            return (
+                f"{intro}\n\n"
+                f"En primer lugar, {self._lowercase_first(summaries[0])}\n\n"
+                f"En segundo lugar, {self._lowercase_first(summaries[1])}"
+                + (
+                    f"\n\nComo complemento tecnico, {self._lowercase_first(summaries[2])}"
+                    if len(summaries) > 2
+                    else ""
+                )
+            )
+
         return (
             f"{intro}\n\n"
-            f"Primero, {self._lowercase_first(summaries[0])}\n\n"
-            f"Tambien hay que tomar en cuenta que {self._lowercase_first(summaries[1])}"
+            f"En primer lugar, {self._lowercase_first(summaries[0])}\n\n"
+            f"Ademas, {self._lowercase_first(summaries[1])}"
             + (
-                f"\n\nY como complemento, {self._lowercase_first(summaries[2])}"
+                f"\n\nEsto tambien permite ver que {self._lowercase_first(summaries[2])}"
                 if len(summaries) > 2
                 else ""
             )

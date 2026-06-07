@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 import re
 import unicodedata
 from collections import Counter
@@ -29,6 +30,18 @@ LOCATION_TERMS = {
     "pichincha", "imbabura", "loja", "azuay", "guayas", "manabi",
 }
 
+CORE_AGRI_TOKENS = {
+    "agricola", "agricolas", "agricultura", "agroecologia", "agroecologico",
+    "agroforestal", "agronomico", "alimento", "alimentos", "ancestral", "biocultural",
+    "biodiversidad", "campesina", "chacra", "chakra", "climatico", "cosecha",
+    "cultivo", "cultivos", "fertilidad", "fertilizante", "huerto", "maiz",
+    "papa", "pasto", "plaga", "quinua", "riego", "semilla", "semillas",
+    "siembra", "suelo", "sustentable", "tradicional",
+}
+
+UPLOAD_MIN_RELEVANCE_SCORE = 0.34
+UPLOAD_MIN_TEXT_CHARS = 180
+
 
 def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text.lower())
@@ -49,11 +62,11 @@ def _load_spacy_model():
     try:
         import spacy
     except Exception:
-        return None
+        return None, ""
 
     for model_name in ("es_core_news_sm", "es_core_news_md"):
         try:
-            return spacy.load(model_name)
+            return spacy.load(model_name), model_name
         except Exception:
             continue
 
@@ -61,9 +74,9 @@ def _load_spacy_model():
         nlp = spacy.blank("es")
         if "sentencizer" not in nlp.pipe_names:
             nlp.add_pipe("sentencizer")
-        return nlp
+        return nlp, "spacy_blank_es"
     except Exception:
-        return None
+        return None, ""
 
 
 def _top_domain_terms(normalized_text: str) -> list[str]:
@@ -86,6 +99,49 @@ def _keyword_terms(cleaned_text: str) -> list[str]:
     return [term for term, _ in counts.most_common(14)]
 
 
+def _extract_pdf_text(content: bytes, max_pages: int = 18, max_chars: int = 24000) -> str:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return ""
+
+    extracted_parts: list[str] = []
+    try:
+        reader = PdfReader(BytesIO(content))
+        for page in reader.pages[:max_pages]:
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                extracted_parts.append(page_text)
+            if sum(len(part) for part in extracted_parts) >= max_chars:
+                break
+    except Exception:
+        return ""
+
+    return _clean_text(" ".join(extracted_parts))[:max_chars]
+
+
+def _relevance_metrics(normalized_text: str, key_terms: list[str]) -> tuple[int, int, int]:
+    domain_hits = sum(1 for term in DOMAIN_TERMS if term in normalized_text)
+    location_hits = sum(1 for term in LOCATION_TERMS if term in normalized_text)
+    agri_hits = sum(1 for term in key_terms if term in CORE_AGRI_TOKENS)
+    return domain_hits, location_hits, agri_hits
+
+
+def _relevance_score(normalized_text: str, key_terms: list[str], text_length: int) -> float:
+    domain_hits, location_hits, agri_hits = _relevance_metrics(normalized_text, key_terms)
+    score = 0.0
+    score += min(domain_hits, 4) * 0.16
+    score += min(location_hits, 3) * 0.08
+    score += min(agri_hits, 5) * 0.1
+    if text_length >= 900:
+        score += 0.18
+    elif text_length >= 400:
+        score += 0.1
+    elif text_length >= UPLOAD_MIN_TEXT_CHARS:
+        score += 0.05
+    return min(1.0, score)
+
+
 def analyze_corpus_document(file_name: str, chunks: list[str]) -> dict:
     text = _clean_text(" ".join(chunks))[:18000]
     normalized_text = _normalize_text(text)
@@ -93,12 +149,13 @@ def analyze_corpus_document(file_name: str, chunks: list[str]) -> dict:
     entities = _top_location_terms(normalized_text)
     key_terms = _keyword_terms(text)
     analyzer = "fallback"
+    model_name = ""
 
-    nlp = _load_spacy_model()
+    nlp, model_name = _load_spacy_model()
     if nlp is not None and text:
         try:
             doc = nlp(text[: nlp.max_length - 1])
-            analyzer = "spacy"
+            analyzer = "spacy" if model_name != "spacy_blank_es" else "spacy_blank"
             if getattr(doc, "ents", None):
                 entity_counts = Counter(
                     ent.text.strip()
@@ -127,4 +184,50 @@ def analyze_corpus_document(file_name: str, chunks: list[str]) -> dict:
         "entities": entities[:12],
         "key_terms": key_terms[:14],
         "nlp_analyzer": analyzer,
+        "nlp_model": model_name,
+    }
+
+
+def inspect_uploaded_pdf(file_name: str, content: bytes) -> dict:
+    text = _extract_pdf_text(content)
+    if len(text) < UPLOAD_MIN_TEXT_CHARS:
+        return {
+            "accepted": False,
+            "relevance_score": 0.0,
+            "detail": (
+                "No pude leer suficiente contenido util dentro del PDF. "
+                "Prueba con un archivo mas legible o con texto seleccionable."
+            ),
+            "topics": [],
+            "entities": [],
+            "key_terms": [],
+            "nlp_analyzer": "fallback",
+            "nlp_model": "",
+        }
+
+    analysis = analyze_corpus_document(file_name, [text])
+    normalized_text = _normalize_text(text)
+    score = _relevance_score(normalized_text, analysis["key_terms"], len(text))
+    domain_hits, location_hits, agri_hits = _relevance_metrics(normalized_text, analysis["key_terms"])
+    accepted = score >= UPLOAD_MIN_RELEVANCE_SCORE and (domain_hits > 0 or agri_hits >= 2)
+
+    if accepted:
+        detail = (
+            "Revise el documento automaticamente y quedo listo para indexarse."
+        )
+    else:
+        detail = (
+            "Revise el documento, pero no encontre suficiente contenido relacionado con agricultura "
+            "o saberes ancestrales como para aceptarlo automaticamente."
+        )
+
+    return {
+        "accepted": accepted,
+        "relevance_score": round(score, 3),
+        "detail": detail,
+        "topics": analysis["topics"],
+        "entities": analysis["entities"],
+        "key_terms": analysis["key_terms"],
+        "nlp_analyzer": analysis["nlp_analyzer"],
+        "nlp_model": analysis["nlp_model"],
     }

@@ -493,3 +493,24 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: cuando el indice activo quedaba listo tras un reindexado exitoso, pero Firestore aun arrastraba un `last_reindex_status: failed` viejo, el backend ahora reconcilia automaticamente el runtime a `success` si el indice materializado esta sano y no esta marcado como stale.
 - Resultado: `correcto`
 - Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-06
+
+- Tipo: `avance`
+- Contexto: se pidio filtrar mejor los documentos al subirlos y evitar mensajes frios o demasiado tecnicos en `/gestion`.
+- Evidencia: `backend/app/corpus_analyzer.py` ahora inspecciona el PDF al subirlo, intenta extraer texto, calcula relevancia tematica y guarda `topics`, `entities`, `key_terms`, `nlp_analyzer` y `nlp_model` desde el ingreso del archivo.
+- Evidencia: si el PDF no es legible o no parece suficientemente relacionado con agricultura o saberes ancestrales, la subida se rechaza con un mensaje mas amigable.
+- Evidencia: `frontend/src/App.jsx` reformula el error de subida para que el usuario vea explicaciones mas naturales dentro del panel `/gestion`.
+- Evidencia: `backend/app/rag_service.py` dejo de mencionar `corpus` en el tono visible de las respuestas fallback del chat.
+- Resultado: `correcto`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-06
+
+- Tipo: `avance`
+- Contexto: se pidio que las preguntas frecuentes dejaran de ser fijas y pasaran a depender de lo que mas pregunta la gente.
+- Evidencia: `backend/app/metadata_repository.py` ahora registra preguntas normalizadas en el estado runtime y conserva un ranking persistente de consultas repetidas.
+- Evidencia: `backend/app/rag_service.py` expone esas preguntas frecuentes en `/health`, lo que permite reutilizarlas sin crear un endpoint aparte.
+- Evidencia: `frontend/src/App.jsx` reemplazo la lista hardcodeada por las preguntas frecuentes reales y actualiza la sugerencia visible despues de cada nueva consulta.
+- Resultado: `correcto`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`

@@ -324,13 +324,15 @@ code {
   height: 0.42rem;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(143, 104, 219, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(169, 132, 247, 0.08);
 }
 
 .backend-progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #64e0b2, #9c7df3);
+  background: linear-gradient(90deg, #8f68db, #a984f7 52%, #c0a3ff);
+  box-shadow: 0 0 14px rgba(143, 104, 219, 0.28);
 }
 
 .backend-progress-stage {
