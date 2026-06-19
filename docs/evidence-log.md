@@ -159,6 +159,14 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Resultado: `correcto`
 - Uso futuro: `interfaz`, `implementacion`, `pruebas`
 
+## 2026-06-07 - Arranque rapido del backend en Cloud Run
+
+- Contexto: al entrar al frontend, la interfaz podia quedarse durante demasiado tiempo en `Preparando sistema` y `Cargando el indice documental...` mientras la API inicializaba el servicio RAG.
+- Evidencia: se ajusto `backend/app/main.py` para que Cloud Run no cargue embeddings de forma ansiosa durante la inicializacion normal del servicio.
+- Evidencia: se ajusto `backend/app/rag_service.py` para que, si el manifiesto publicado coincide con los PDFs actuales, la API pueda quedar lista rapidamente usando el `chunk_cache` activo.
+- Resultado esperado: el frontend debe salir antes de `Preparando sistema` cuando ya existe un indice publicado compatible.
+- Uso futuro: `interfaz`, `pruebas`, `operacion cloud`
+
 ### Resultado
 
 - correcto

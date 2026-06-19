@@ -462,6 +462,20 @@ class RAGService:
                 f"No se encontraron archivos PDF en {self._document_source_label()} ni un chunk_cache utilizable en backend/storage."
             )
 
+        if (
+            not force_rebuild
+            and not self.vector_backend_ready
+            and self._manifests_equivalent(materialized.manifest, current_manifest)
+            and materialized.chunk_cache
+        ):
+            self._report_progress(88, "chunk-cache", "Cargando indice publicado en modo rapido...")
+            self.chunk_cache = materialized.chunk_cache
+            self.index_stale = False
+            self.index_detail = "Servicio listo"
+            self.last_index_source = materialized.source_label
+            self._loaded_manifest_signature = self._manifest_signature(materialized.manifest)
+            return None
+
         if not force_rebuild and self._has_usable_persisted_index(current_manifest):
             from llama_index.core import StorageContext, load_index_from_storage
 

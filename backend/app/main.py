@@ -272,7 +272,10 @@ def initialize_service(force_rebuild: bool = False) -> None:
     try:
         if rag_service is None:
             update_init_state(2, "starting", "Inicializando servicio...")
-            rag_service = RAGService(progress_callback=update_init_state)
+            rag_service = RAGService(
+                progress_callback=update_init_state,
+                eager_embeddings=settings.deployment_target != "cloud-run",
+            )
         elif force_rebuild:
             update_init_state(12, "reindexing", "Reconstruyendo el indice documental...")
             rag_service.reindex()
@@ -288,6 +291,14 @@ def ensure_service_initializing(force_rebuild: bool = False) -> None:
     global init_thread
 
     if rag_service is not None and not force_rebuild:
+        return
+
+    if settings.deployment_target == "cloud-run" and force_rebuild:
+        with init_lock:
+            if rag_service is None:
+                initialize_service(force_rebuild=False)
+            else:
+                initialize_service(force_rebuild=True)
         return
 
     with init_lock:
@@ -308,6 +319,8 @@ def ensure_service_initializing(force_rebuild: bool = False) -> None:
 
 @app.on_event("startup")
 def startup_event() -> None:
+    if settings.deployment_target == "cloud-run":
+        return
     ensure_service_initializing(force_rebuild=False)
 
 
@@ -325,6 +338,16 @@ def healthcheck() -> HealthResponse:
             indexed_files=[],
             indexed_file_count=0,
             index_ready=False,
+            deployment_mode=settings.deployment_target,
+            allow_reindex=settings.allow_runtime_reindex,
+            enable_vector_retrieval=settings.enable_vector_retrieval,
+            document_storage_backend=settings.document_storage_backend,
+            index_storage_backend=settings.index_storage_backend,
+            metadata_backend=settings.metadata_backend,
+            process_state_backend=settings.process_state_backend,
+            documents_bucket=settings.documents_bucket,
+            indexes_bucket=settings.indexes_bucket,
+            active_index_name=settings.active_index_name,
         )
 
     return HealthResponse(**rag_service.get_status())

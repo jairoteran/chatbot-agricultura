@@ -67,6 +67,7 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se amplio el timeout del proxy Nginx del frontend en Cloud Run para evitar `504 Gateway Timeout` durante respuestas generativas lentas
 - Se agrego `LLM_TIMEOUT_SECONDS=2.2` para cortar la espera de Gemini y mantener la API orientada a respuestas menores a 3 segundos, usando fallback limpio si el modelo no responde a tiempo
 - Se ajusto el mensaje inicial del chat publico para que no asuma ni mencione una carga previa de documentos
+- Se optimizo el arranque de la API en Cloud Run para cargar rapidamente el indice publicado desde `chunk_cache` sin bloquear la pagina esperando el backend de embeddings
 - Se eliminaron menciones al `corpus` dentro del tono visible de las respuestas del chat y se reforzo un estilo mas conversacional, directo y natural
 - Se volvieron dinamicas las `Preguntas frecuentes`, tomando como base las consultas reales mas repetidas y persistiendo ese ranking en el estado runtime del backend
 - Se movio tambien el arranque de cloud a inicializacion en segundo plano para que `/health` responda antes y la UI no quede tanto tiempo bloqueada en `Preparando sistema`
@@ -80,6 +81,7 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Ajuste fino de experiencia movil y tono conversacional del asistente sobre pruebas reales en localhost y cloud
 - Evolucion metodologica del corpus hacia gestion documental sin roles rigidos y enriquecimiento NLP con `spaCy`
 - Revision de textos visibles para que el chat publico suene mas general cuando el usuario aun no ha dado contexto
+- Validacion del arranque rapido en Cloud Run para reducir el tiempo visible en `Preparando sistema`
 
 ## Pendiente inmediato
 
@@ -164,3 +166,5 @@ En los bloques posteriores se corrigio el flujo cloud para soportar PDFs grandes
 En el bloque mas reciente se ajusto la experiencia del chat publico: se simplificaron elementos laterales visibles, se mejoro el tono del asistente para responder de forma mas directa y confiable, se limpiaron titulos documentales mostrados al usuario y se incorporo un menu lateral desplegable para pantallas moviles, dejando el chat como foco principal.
 
 En el bloque actual se ajusto el saludo inicial del chat publico para evitar frases que den por hecho que el usuario ya cargo documentos. El objetivo es que la primera interaccion sea mas neutra y natural, manteniendo la posibilidad de hacer preguntas, pedir resumenes o comparar informacion cuando corresponda.
+
+Tambien se ajusto el arranque de la API cloud para que no bloquee la experiencia inicial cargando embeddings si ya existe un indice publicado compatible. En ese caso, la API puede quedar lista usando el `chunk_cache` activo y responder antes, reduciendo el tiempo que el frontend permanece en `Preparando sistema`.
