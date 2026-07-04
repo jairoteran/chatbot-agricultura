@@ -8,8 +8,11 @@ param(
     [string]$EnvFile = "",
     [string]$ServiceAccount = "",
     [string]$GeminiApiSecret = "",
+    [string]$GroqApiSecret = "",
     [string]$AdminSessionSecret = "",
-    [string]$Memory = "1Gi",
+    [string]$Memory = "4Gi",
+    [string]$Cpu = "4",
+    [string]$Timeout = "120s",
     [string]$AllowRuntimeReindex = "false",
     [string]$DocumentStorageBackend = "",
     [string]$CorsOrigins = "",
@@ -119,7 +122,9 @@ $baseArgs = @(
     "--image", $image,
     "--platform", "managed",
     "--env-vars-file", $envFileForDeploy,
-    "--memory", $Memory
+    "--memory", $Memory,
+    "--cpu", $Cpu,
+    "--timeout", $Timeout
 )
 
 if ($AllowUnauthenticated) {
@@ -132,11 +137,18 @@ if (-not [string]::IsNullOrWhiteSpace($ServiceAccount)) {
     $baseArgs += @("--service-account", $ServiceAccount)
 }
 
+$secretBindings = @()
 if (-not [string]::IsNullOrWhiteSpace($GeminiApiSecret)) {
-    $baseArgs += @("--set-secrets", "GEMINI_API_KEY=$GeminiApiSecret`:latest")
+    $secretBindings += "GEMINI_API_KEY=$GeminiApiSecret`:latest"
+}
+if (-not [string]::IsNullOrWhiteSpace($GroqApiSecret)) {
+    $secretBindings += "GROQ_API_KEY=$GroqApiSecret`:latest"
 }
 if (-not [string]::IsNullOrWhiteSpace($AdminSessionSecret)) {
-    $baseArgs += @("--set-secrets", "ADMIN_SESSION_SECRET=$AdminSessionSecret`:latest")
+    $secretBindings += "ADMIN_SESSION_SECRET=$AdminSessionSecret`:latest"
+}
+if ($secretBindings.Count -gt 0) {
+    $baseArgs += @("--set-secrets", ($secretBindings -join ","))
 }
 
 try {
@@ -156,6 +168,8 @@ try {
     Write-Host "Imagen: $image"
     Write-Host "Env file: $EnvFile"
     Write-Host "Memory: $Memory"
+    Write-Host "CPU: $Cpu"
+    Write-Host "Timeout: $Timeout"
     Write-Host "ALLOW_RUNTIME_REINDEX: $AllowRuntimeReindex"
     if (-not [string]::IsNullOrWhiteSpace($DocumentStorageBackend)) {
         Write-Host "DOCUMENT_STORAGE_BACKEND: $DocumentStorageBackend"
@@ -174,6 +188,9 @@ try {
     }
     if (-not [string]::IsNullOrWhiteSpace($GeminiApiSecret)) {
         Write-Host "Secret Gemini: $GeminiApiSecret"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GroqApiSecret)) {
+        Write-Host "Secret Groq: $GroqApiSecret"
     }
     if (-not [string]::IsNullOrWhiteSpace($AdminSessionSecret)) {
         Write-Host "Secret Admin Session: $AdminSessionSecret"

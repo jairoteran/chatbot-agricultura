@@ -1,8 +1,5 @@
 from pydantic import BaseModel, Field
 
-RESPONSE_STYLE_PATTERN = "^(academico|simple|tecnico)$"
-
-
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
     content: str = Field(..., min_length=1, max_length=4000)
@@ -11,11 +8,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=3, description="Pregunta del usuario")
     history: list[ChatMessage] = Field(default_factory=list, max_length=12)
-    response_style: str = Field(
-        default="academico",
-        pattern=RESPONSE_STYLE_PATTERN,
-        description="Estilo de respuesta: academico, simple o tecnico",
-    )
+    response_style: str = Field(default="chat", description="Campo conservado por compatibilidad.")
 
 
 class SourceChunk(BaseModel):
@@ -97,11 +90,7 @@ class ReindexResponse(BaseModel):
 
 class DocumentSummaryRequest(BaseModel):
     file_name: str = Field(..., min_length=1, description="Nombre del documento")
-    response_style: str = Field(
-        default="academico",
-        pattern=RESPONSE_STYLE_PATTERN,
-        description="Estilo de resumen: academico, simple o tecnico",
-    )
+    response_style: str = Field(default="chat", description="Campo conservado por compatibilidad.")
 
 
 class DocumentSummaryResponse(BaseModel):

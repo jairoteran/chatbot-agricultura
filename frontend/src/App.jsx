@@ -15,6 +15,8 @@ const ADMIN_BASE_PATH = import.meta.env.VITE_ADMIN_BASE_PATH || "/gestion";
 const HEALTH_CACHE_KEY = "tesis-producto-health-cache";
 const HEALTH_CACHE_TTL_MS = 1000 * 60 * 30;
 const ADMIN_SESSION_STORAGE_KEY = "tesis-producto-admin-session";
+const CHAT_HISTORY_STORAGE_KEY = "tesis-producto-chat-history";
+const MAX_SAVED_CONVERSATIONS = 12;
 
 const initialMessage = {
   role: "assistant",
@@ -22,6 +24,13 @@ const initialMessage = {
     "Hola. Estoy listo para ayudarte. Puede hacer preguntas, pedir resúmenes o comparar información cuando lo necesite.",
   sources: [],
 };
+
+const loadingMessages = [
+  "Buscando información...",
+  "Revisando fuentes...",
+  "Analizando evidencia...",
+  "Redactando respuesta...",
+];
 
 const shellVariants = {
   hidden: { opacity: 0, y: 16 },
@@ -55,12 +64,6 @@ const panelVariants = {
     transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] },
   },
 };
-
-const responseStyleOptions = [
-  { value: "academico", label: "Academico" },
-  { value: "simple", label: "Simple" },
-  { value: "tecnico", label: "Tecnico" },
-];
 
 const defaultSuggestedQuestions = [
   "¿Qué dice el manual sobre agricultura ecológica?",
@@ -196,6 +199,49 @@ function adminAuthHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
   };
+}
+
+function readSavedConversations() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+    const parsed = JSON.parse(rawValue || "[]");
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((conversation) => conversation?.id && conversation?.title && Array.isArray(conversation?.messages))
+      .slice(0, MAX_SAVED_CONVERSATIONS);
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedConversations(conversations) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      CHAT_HISTORY_STORAGE_KEY,
+      JSON.stringify(conversations.slice(0, MAX_SAVED_CONVERSATIONS)),
+    );
+  } catch {
+    // Ignoramos fallos de localStorage.
+  }
+}
+
+function createConversationId() {
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function conversationTitleFromQuestion(question) {
+  const cleaned = String(question || "").replace(/\s+/g, " ").trim();
+  return compactLabel(cleaned || "Nueva conversación", 46);
 }
 
 function mergeFrequentQuestions(existingQuestions, latestQuestion) {
@@ -568,6 +614,54 @@ function adminReindexStageCopy(status) {
   return "Aun no se ha ejecutado un reindexado manual.";
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 KB";
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
+function adminGenerationLabel(status) {
+  const value = status?.last_generation_status || "";
+  if (!value || value === "not_used") {
+    return "Sin consultas";
+  }
+  if (value === "success") {
+    return "Generada con IA";
+  }
+  if (value === "failed") {
+    return "Fallback usado";
+  }
+  if (value === "empty") {
+    return "Respuesta vacia";
+  }
+  return value;
+}
+
+function collectDocumentTerms(documents, maxTerms = 6) {
+  const frequencies = new Map();
+  documents.forEach((document) => {
+    [...(document.topics || []), ...(document.key_terms || [])]
+      .filter(Boolean)
+      .slice(0, 6)
+      .forEach((term) => {
+        const cleaned = String(term).trim();
+        if (!cleaned) {
+          return;
+        }
+        frequencies.set(cleaned, (frequencies.get(cleaned) || 0) + 1);
+      });
+  });
+  return [...frequencies.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, maxTerms)
+    .map(([term]) => term);
+}
+
 function documentStatusLabel(status) {
   if (status === "indexed") {
     return "Indexado";
@@ -626,13 +720,15 @@ function uploadFileToGcsSession(uploadUrl, file, onProgress) {
 
 function PublicChatApp() {
   const cachedBackendStatus = readCachedHealthStatus();
+  const [savedConversations, setSavedConversations] = useState(readSavedConversations);
+  const [activeConversationId, setActiveConversationId] = useState("");
   const [messages, setMessages] = useState([initialMessage]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState("");
-  const [responseStyle, setResponseStyle] = useState("academico");
   const [backendLoadProgress, setBackendLoadProgress] = useState(
     cachedBackendStatus ? 100 : 7,
   );
@@ -648,9 +744,83 @@ function PublicChatApp() {
   const currentBackendUiState = backendUiState(backendStatus, backendReady);
   const indexedDocuments = normalizeIndexedDocuments(backendStatus);
 
+  function saveConversation(nextMessages, question) {
+    const hasUserMessage = nextMessages.some((message) => message.role === "user");
+    if (!hasUserMessage) {
+      return;
+    }
+
+    const conversationId = activeConversationId || createConversationId();
+    const existingConversation = savedConversations.find(
+      (conversation) => conversation.id === conversationId,
+    );
+    const savedConversation = {
+      id: conversationId,
+      title: existingConversation?.title || conversationTitleFromQuestion(question),
+      messages: nextMessages,
+      updatedAt: Date.now(),
+    };
+
+    const nextConversations = [
+      savedConversation,
+      ...savedConversations.filter((conversation) => conversation.id !== conversationId),
+    ].slice(0, MAX_SAVED_CONVERSATIONS);
+
+    setActiveConversationId(conversationId);
+    setSavedConversations(nextConversations);
+    persistSavedConversations(nextConversations);
+  }
+
+  function handleNewChat() {
+    setMessages([initialMessage]);
+    setInput("");
+    setActiveConversationId("");
+    setIsMobileSidebarOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function handleOpenConversation(conversation) {
+    if (!conversation?.messages?.length) {
+      return;
+    }
+    setMessages(conversation.messages);
+    setInput("");
+    setActiveConversationId(conversation.id);
+    setIsMobileSidebarOpen(false);
+  }
+
+  function handleDeleteConversation(event, conversationId) {
+    event.stopPropagation();
+    const nextConversations = savedConversations.filter(
+      (conversation) => conversation.id !== conversationId,
+    );
+    setSavedConversations(nextConversations);
+    persistSavedConversations(nextConversations);
+    if (conversationId === activeConversationId) {
+      setMessages([initialMessage]);
+      setInput("");
+      setActiveConversationId("");
+    }
+  }
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingMessageIndex(0);
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setLoadingMessageIndex((currentIndex) =>
+        (currentIndex + 1) % loadingMessages.length,
+      );
+    }, 2200);
+
+    return () => window.clearInterval(intervalId);
+  }, [isLoading]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -807,6 +977,7 @@ function PublicChatApp() {
     const nextMessages = [...messages, { role: "user", content: question, sources: [] }];
     setMessages(nextMessages);
     setInput("");
+    setLoadingMessageIndex(0);
     setIsLoading(true);
 
     try {
@@ -823,7 +994,7 @@ function PublicChatApp() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ question, history, response_style: responseStyle }),
+        body: JSON.stringify({ question, history }),
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -831,14 +1002,17 @@ function PublicChatApp() {
         throw new Error(payload.detail || "No fue posible consultar el backend.");
       }
 
-      setMessages([
+      const assistantMessage = {
+        role: "assistant",
+        content: payload.answer,
+        sources: payload.sources || [],
+      };
+      const completedMessages = [
         ...nextMessages,
-        {
-          role: "assistant",
-          content: payload.answer,
-          sources: payload.sources || [],
-        },
-      ]);
+        assistantMessage,
+      ];
+      setMessages(completedMessages);
+      saveConversation(completedMessages, question);
       setBackendStatus((currentStatus) => ({
         ...currentStatus,
         frequent_questions: mergeFrequentQuestions(currentStatus?.frequent_questions, question),
@@ -885,7 +1059,6 @@ function PublicChatApp() {
         },
         body: JSON.stringify({
           file_name: selectedDocument,
-          response_style: responseStyle,
         }),
       });
 
@@ -992,6 +1165,15 @@ function PublicChatApp() {
           </p>
         </div>
 
+        <button
+          type="button"
+          className="new-chat-button"
+          onClick={handleNewChat}
+        >
+          <span>＋</span>
+          Nuevo chat
+        </button>
+
         <motion.div className="status-panel" variants={panelVariants}>
           <div className="sidebar-heading-row">
             <motion.div
@@ -1005,11 +1187,40 @@ function PublicChatApp() {
             </motion.div>
           </div>
 
-          <div className="status-highlights">
-            <div className="status-card status-card-wide">
-              <span className="status-card-value">&lt; 3s</span>
-              <span className="status-card-caption">Tiempo de respuesta</span>
-            </div>
+          <div className="sidebar-section chat-history-section">
+            <span className="status-card-label">Conversaciones</span>
+            {savedConversations.length > 0 ? (
+              <div className="chat-history-list">
+                {savedConversations.map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    className={`chat-history-button${
+                      conversation.id === activeConversationId ? " chat-history-button-active" : ""
+                    }`}
+                    onClick={() => handleOpenConversation(conversation)}
+                  >
+                    <span>{conversation.title}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="chat-history-delete"
+                      aria-label={`Eliminar ${conversation.title}`}
+                      onClick={(event) => handleDeleteConversation(event, conversation.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          handleDeleteConversation(event, conversation.id);
+                        }
+                      }}
+                    >
+                      ×
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="chat-history-empty">Tus conversaciones aparecerán aquí.</p>
+            )}
           </div>
 
           <div className="sidebar-section">
@@ -1095,25 +1306,6 @@ function PublicChatApp() {
 
           <div className="chat-toolbar chat-toolbar-desktop">
             <div className="toolbar-controls">
-              <div className="toolbar-field">
-                <label className="summary-label" htmlFor="response-style-select">
-                  Estilo
-                </label>
-                <select
-                  id="response-style-select"
-                  className="summary-select toolbar-select"
-                  value={responseStyle}
-                  onChange={(event) => setResponseStyle(event.target.value)}
-                  disabled={isLoading || isSummarizing}
-                >
-                  {responseStyleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {indexedDocuments.length > 0 && (
                 <div className="toolbar-field toolbar-field-document">
                   <label className="summary-label" htmlFor="document-summary-select">
@@ -1247,7 +1439,9 @@ function PublicChatApp() {
                         transition={{ repeat: Infinity, duration: 1, delay: 0.3 }}
                       />
                     </div>
-                    <span className="loading-copy">Preparando respuesta...</span>
+                    <span className="loading-copy">
+                      {loadingMessages[loadingMessageIndex]}
+                    </span>
                   </motion.div>
                 </motion.article>
               )}
@@ -1763,6 +1957,11 @@ function AdminApp() {
   const totalDocumentCount = documents.length;
   const indexedDocumentCount = Math.min(systemStatus?.indexed_file_count || 0, totalDocumentCount);
   const pendingDocumentCount = Math.max(totalDocumentCount - indexedDocumentCount, 0);
+  const failedDocumentCount = documents.filter((document) => document.status === "failed").length;
+  const totalDocumentBytes = documents.reduce((total, document) => total + Number(document.size || 0), 0);
+  const averageDocumentBytes = totalDocumentCount > 0 ? totalDocumentBytes / totalDocumentCount : 0;
+  const topDocumentTerms = collectDocumentTerms(documents);
+  const generationLabel = adminGenerationLabel(systemStatus);
   const showReindexProgressPanel =
     reindexRunning ||
     systemStatus?.runtime_last_reindex_status === "failed" ||
@@ -1963,6 +2162,114 @@ function AdminApp() {
               </div>
               <p className="status-meta">
                 {systemStatus?.detail || "Sin novedades operativas por ahora."}
+              </p>
+            </div>
+          </div>
+
+          <div className="admin-grid admin-grid-wide admin-overview-extra-grid">
+            <div className="admin-panel">
+              <span className="status-card-label">Corpus documental</span>
+              <h2>Estado de la biblioteca</h2>
+              <div className="admin-metric-grid admin-metric-grid-three">
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Total</span>
+                  <strong>{totalDocumentCount}</strong>
+                </div>
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Indexados</span>
+                  <strong>{indexedDocumentCount}</strong>
+                </div>
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Pendientes</span>
+                  <strong>{pendingDocumentCount}</strong>
+                </div>
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Con error</span>
+                  <strong>{failedDocumentCount}</strong>
+                </div>
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Tamano total</span>
+                  <strong>{formatBytes(totalDocumentBytes)}</strong>
+                </div>
+                <div className="admin-metric-card">
+                  <span className="admin-metric-label">Promedio</span>
+                  <strong>{formatBytes(averageDocumentBytes)}</strong>
+                </div>
+              </div>
+              <p className="status-meta">
+                {pendingDocumentCount > 0
+                  ? "Hay documentos pendientes; conviene reindexar para que entren al chat."
+                  : "El corpus visible esta sincronizado con el indice activo."}
+              </p>
+            </div>
+
+            <div className="admin-panel">
+              <span className="status-card-label">Accesos rapidos</span>
+              <h2>Operaciones principales</h2>
+              <div className="admin-quick-actions">
+                <button
+                  type="button"
+                  className="admin-quick-action-button"
+                  onClick={() => setActiveAdminSection("documents")}
+                >
+                  <strong>Gestionar documentos</strong>
+                  <span>Subir PDFs, revisar estados y ejecutar reindexado.</span>
+                </button>
+                <button
+                  type="button"
+                  className="admin-quick-action-button"
+                  onClick={() => setActiveAdminSection("monitoring")}
+                >
+                  <strong>Ver monitoreo</strong>
+                  <span>Revisar proveedor IA, modelo, latencia y ultima generacion.</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-grid admin-grid-wide admin-overview-extra-grid">
+            <div className="admin-panel">
+              <span className="status-card-label">Lectura operativa</span>
+              <h2>Que requiere atencion</h2>
+              <div className="admin-detail-list">
+                <div className="admin-detail-row">
+                  <span>Documentos pendientes</span>
+                  <strong>{pendingDocumentCount}</strong>
+                </div>
+                <div className="admin-detail-row">
+                  <span>Documentos con error</span>
+                  <strong>{failedDocumentCount}</strong>
+                </div>
+                <div className="admin-detail-row">
+                  <span>Ultima respuesta IA</span>
+                  <strong>{generationLabel}</strong>
+                </div>
+                <div className="admin-detail-row">
+                  <span>Latencia reciente</span>
+                  <strong>{systemStatus?.last_response_ms ? `${systemStatus.last_response_ms} ms` : "Sin consultas"}</strong>
+                </div>
+              </div>
+              <p className="status-meta">
+                {pendingDocumentCount > 0
+                  ? "La accion recomendada esta en Documentos: ejecutar reindexado."
+                  : "No hay alertas documentales visibles en este momento."}
+              </p>
+            </div>
+
+            <div className="admin-panel">
+              <span className="status-card-label">Temas detectados</span>
+              <h2>Lectura rapida del corpus</h2>
+              {topDocumentTerms.length > 0 ? (
+                <div className="admin-chip-list">
+                  {topDocumentTerms.map((term) => (
+                    <span key={term} className="admin-chip">{compactLabel(term, 26)}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="status-meta">Aun no hay etiquetas suficientes para resumir el corpus.</p>
+              )}
+              <p className="status-meta">
+                Estas etiquetas salen del analisis documental usado por el panel de gestion.
               </p>
             </div>
           </div>

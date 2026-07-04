@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from hashlib import sha256
 from pathlib import Path
 
@@ -317,6 +318,14 @@ def ensure_service_initializing(force_rebuild: bool = False) -> None:
         init_thread.start()
 
 
+def wait_for_service_ready(timeout_seconds: float = 18.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    ensure_service_initializing(force_rebuild=False)
+    while rag_service is None and startup_error is None and time.monotonic() < deadline:
+        time.sleep(0.2)
+    return rag_service is not None
+
+
 @app.on_event("startup")
 def startup_event() -> None:
     if settings.deployment_target == "cloud-run":
@@ -593,13 +602,11 @@ def reindex(_: AdminSessionResponse = Depends(require_admin_session)) -> Reindex
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest) -> ChatResponse:
     if rag_service is None:
-        ensure_service_initializing(force_rebuild=False)
-        if rag_service is not None:
+        if wait_for_service_ready():
             history = [message.model_dump() for message in payload.history]
             result = rag_service.query(
                 payload.question,
                 history=history,
-                response_style=payload.response_style,
             )
             return ChatResponse(**result)
         raise HTTPException(
@@ -612,7 +619,6 @@ def chat(payload: ChatRequest) -> ChatResponse:
         result = rag_service.query(
             payload.question,
             history=history,
-            response_style=payload.response_style,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -627,7 +633,6 @@ def summarize_document(payload: DocumentSummaryRequest) -> DocumentSummaryRespon
         if rag_service is not None:
             result = rag_service.summarize_document(
                 payload.file_name,
-                response_style=payload.response_style,
             )
             return DocumentSummaryResponse(**result)
         raise HTTPException(
@@ -638,7 +643,6 @@ def summarize_document(payload: DocumentSummaryRequest) -> DocumentSummaryRespon
     try:
         result = rag_service.summarize_document(
             payload.file_name,
-            response_style=payload.response_style,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

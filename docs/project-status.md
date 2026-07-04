@@ -65,14 +65,20 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 - Se suavizo el fallback extractivo para evitar respuestas con encabezados OCR o bloques crudos si Gemini no devuelve texto
 - Se agrego `GEMINI_FALLBACK_MODEL` para intentar un modelo Gemini alternativo cuando `gemini-2.5-flash` responde `503 UNAVAILABLE` por alta demanda
 - Se amplio el timeout del proxy Nginx del frontend en Cloud Run para evitar `504 Gateway Timeout` durante respuestas generativas lentas
-- Se agrego `LLM_TIMEOUT_SECONDS=2.2` para cortar la espera de Gemini y mantener la API orientada a respuestas menores a 3 segundos, usando fallback limpio si el modelo no responde a tiempo
+- Se ajusto `LLM_TIMEOUT_SECONDS=6.5` para priorizar respuestas generativas de mejor calidad con `gemini-2.5-flash`, dejando `gemini-2.5-flash-lite` como fallback rapido
 - Se ajusto el mensaje inicial del chat publico para que no asuma ni mencione una carga previa de documentos
 - Se optimizo el arranque de la API en Cloud Run para cargar rapidamente el indice publicado desde `chunk_cache` sin bloquear la pagina esperando el backend de embeddings
+- Se corrigio un bloqueo de inicializacion donde la API podia quedarse en `Inicializando servicio...` si Firestore tardaba al leer el estado runtime durante la creacion de `RAGService`
 - Se eliminaron menciones al `corpus` dentro del tono visible de las respuestas del chat y se reforzo un estilo mas conversacional, directo y natural
 - Se volvieron dinamicas las `Preguntas frecuentes`, tomando como base las consultas reales mas repetidas y persistiendo ese ranking en el estado runtime del backend
 - Se movio tambien el arranque de cloud a inicializacion en segundo plano para que `/health` responda antes y la UI no quede tanto tiempo bloqueada en `Preparando sistema`
 - Se agrego un timeout configurable para la carga de embeddings (`EMBEDDING_INIT_TIMEOUT_SECONDS`), permitiendo que cloud arranque en modo rapido si Hugging Face tarda demasiado en inicializarse
 - Se estabilizo el `document_id` de metadatos por `relative_path` para evitar registros duplicados en Firestore y corregir casos donde un PDF seguia apareciendo como `pending_index` despues del reindexado cloud
+- Se agrego un filtro tematico explicito para rechazar preguntas fuera del dominio agricola y evitar respuestas incoherentes cuando la consulta no pertenece al tema del proyecto
+- Se reforzo la respuesta a preguntas practicas tipo `como sembrar tomate` o `como cultivar papa`, guiando al modelo y al fallback para responder como proceso util y no como simple descripcion general
+- Se corrigio la deteccion de preguntas procedimentales para que expresiones como `como se relacionan...` no se traten automaticamente como instrucciones paso a paso
+- Se endurecio la seleccion de evidencia del RAG para que, con el limite sub-3 segundos, el backend prefiera no responder antes que construir respuestas con fragmentos debiles o poco consistentes
+- Se elimino el selector de estilos de respuesta y el sistema paso a un unico tono conversacional, mas directo y uniforme, tanto para chat como para resumen documental
 
 ## En progreso
 
@@ -168,3 +174,5 @@ En el bloque mas reciente se ajusto la experiencia del chat publico: se simplifi
 En el bloque actual se ajusto el saludo inicial del chat publico para evitar frases que den por hecho que el usuario ya cargo documentos. El objetivo es que la primera interaccion sea mas neutra y natural, manteniendo la posibilidad de hacer preguntas, pedir resumenes o comparar informacion cuando corresponda.
 
 Tambien se ajusto el arranque de la API cloud para que no bloquee la experiencia inicial cargando embeddings si ya existe un indice publicado compatible. En ese caso, la API puede quedar lista usando el `chunk_cache` activo y responder antes, reduciendo el tiempo que el frontend permanece en `Preparando sistema`.
+
+Despues se detecto que el arranque podia quedarse antes de reportar progreso real porque `RAGService` leia Firestore en el constructor. Se cambio ese punto para iniciar con un estado runtime vacio y leer Firestore de forma segura despues, evitando que `/health` y la carga inicial dependan indefinidamente de una lectura de metadatos.

@@ -83,6 +83,7 @@ class AppSettings:
     firestore_runtime_collection: str
     gemini_model: str
     gemini_fallback_model: str
+    groq_model: str
     llm_timeout_seconds: float
     embedding_init_timeout_seconds: float
     openai_model: str
@@ -155,8 +156,9 @@ def get_settings() -> AppSettings:
         firestore_jobs_collection=os.getenv("FIRESTORE_JOBS_COLLECTION", "reindex_jobs").strip() or "reindex_jobs",
         firestore_runtime_collection=os.getenv("FIRESTORE_RUNTIME_COLLECTION", "runtime_state").strip() or "runtime_state",
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
-        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash",
-        llm_timeout_seconds=max(0.5, _env_float("LLM_TIMEOUT_SECONDS", 2.2)),
+        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite",
+        groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip() or "llama-3.1-8b-instant",
+        llm_timeout_seconds=max(0.5, _env_float("LLM_TIMEOUT_SECONDS", 10.0)),
         embedding_init_timeout_seconds=max(5.0, _env_float("EMBEDDING_INIT_TIMEOUT_SECONDS", 18.0)),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini",
         allow_runtime_reindex=allow_runtime_reindex,

@@ -140,9 +140,25 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 ## 2026-05-31 - Objetivo de respuesta menor a 3 segundos
 
 - Contexto: se definio que el chat debe priorizar tiempos de respuesta menores a 3 segundos.
-- Evidencia: se agrego `LLM_TIMEOUT_SECONDS` con valor recomendado `2.2` para cortar llamadas lentas al proveedor generativo antes de que la API supere el objetivo de latencia.
+- Evidencia: se agrego `LLM_TIMEOUT_SECONDS` con valor recomendado inicialmente `2.2` para cortar llamadas lentas al proveedor generativo antes de que la API supere el objetivo de latencia.
 - Decision: si Gemini no responde dentro de esa ventana, el sistema debe devolver un fallback limpio basado en recuperacion documental antes que bloquear la interfaz.
 - Riesgo aceptado: una respuesta fallback puede ser menos natural que una respuesta generativa completa, pero evita `504 Gateway Timeout` y mantiene la experiencia operativa.
+
+## 2026-07-02 - Ajuste de calidad generativa dentro del rango 3-5 segundos
+
+- Contexto: la evaluacion de respuestas mostro que Gemini era cortado por `LLM_TIMEOUT_SECONDS=2.2`, provocando caida frecuente al fallback extractivo y respuestas menos coherentes.
+- Correccion: se ajusto `LLM_TIMEOUT_SECONDS` a `4.2` para permitir respuestas generativas dentro del rango objetivo de 3 a 5 segundos.
+- Correccion: se cambio la deteccion procedimental para que una pregunta que empieza con `como` solo sea tratada como guia paso a paso si contiene señales reales de proceso, como `sembrar`, `cultivar`, `manejar`, `regar` o similares.
+- Resultado esperado: mas respuestas deben salir de Gemini en lugar del fallback, y preguntas conceptuales como `Como se relacionan los saberes ancestrales con la agricultura?` ya no deberian redactarse como proceso paso a paso.
+- Uso futuro: `pruebas`, `calidad de respuestas`, `operacion cloud`
+
+## 2026-07-02 - Priorizacion de calidad con Gemini 2.5 Flash
+
+- Contexto: pruebas directas mostraron que `gemini-2.5-flash` puede responder prompts RAG medianos alrededor de 4 a 5 segundos, mientras que `gemini-2.5-flash-lite` responde mas rapido pero con menor margen de calidad.
+- Decision: mantener `gemini-2.5-flash` como modelo principal para calidad y usar `gemini-2.5-flash-lite` como fallback rapido.
+- Correccion: se ajusto `LLM_TIMEOUT_SECONDS` a `6.5` y se redujo la evidencia por fragmento enviada al LLM (`MAX_LLM_EVIDENCE_CHARS=650`) para dar mas margen al modelo principal sin hacer esperas excesivas.
+- Resultado esperado: mas respuestas deben provenir de Gemini y menos del fallback extractivo, manteniendo tiempos razonables para el usuario.
+- Uso futuro: `pruebas`, `calidad de respuestas`, `operacion cloud`
 
 ## 2026-05-30 - Simplificacion de la interfaz publica y experiencia movil
 
@@ -166,6 +182,15 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: se ajusto `backend/app/rag_service.py` para que, si el manifiesto publicado coincide con los PDFs actuales, la API pueda quedar lista rapidamente usando el `chunk_cache` activo.
 - Resultado esperado: el frontend debe salir antes de `Preparando sistema` cuando ya existe un indice publicado compatible.
 - Uso futuro: `interfaz`, `pruebas`, `operacion cloud`
+
+## 2026-07-02 - Bloqueo de inicializacion por lectura temprana de Firestore
+
+- Contexto: la API quedaba en `/health` con `status: checking`, `init_progress: 2` y `Inicializando servicio...`, mientras `/chat` devolvia `503`.
+- Causa: `RAGService` intentaba leer `metadata_repository.get_runtime_state()` durante su constructor, antes de reportar el progreso `5`. Si Firestore tardaba, la inicializacion quedaba bloqueada en el estado inicial.
+- Correccion: `RAGService` ahora arranca con `RuntimeStateRecord()` local y lee el estado runtime de Firestore despues mediante una lectura segura con timeout corto.
+- Evidencia: tambien se protegieron lecturas no criticas de estado runtime y registro de preguntas para que no bloqueen `/health` ni `/chat` si Firestore responde lento.
+- Resultado esperado: la API debe avanzar mas alla de `Inicializando servicio...` y no quedar bloqueada por metadatos durante el arranque.
+- Uso futuro: `operacion cloud`, `pruebas`, `diagnostico`
 
 ### Resultado
 
@@ -548,5 +573,16 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Contexto: en cloud, varios documentos seguian apareciendo como `Pendiente de indexar` incluso despues de ejecutar el reindexado manual, y sus contenidos no entraban al flujo de consulta.
 - Evidencia: el problema estaba en que los metadatos documentales se identificaban por fingerprint, lo que podia generar registros duplicados del mismo `relative_path` en Firestore entre la subida y el reindexado.
 - Evidencia: `backend/app/metadata_models.py`, `backend/app/main.py` y `backend/app/metadata_repository.py` fueron corregidos para usar un `document_id` estable por `relative_path`, deduplicar registros previos y conservar solo el estado mas reciente por archivo.
+- Resultado: `corregido en codigo`
+- Uso futuro: `implementacion`, `pruebas`, `anexos`
+
+### 2026-06-24
+
+- Tipo: `avance`
+- Contexto: el chat podia responder incoherencias cuando la pregunta no pertenecia al dominio agricola, y en preguntas practicas como `como sembrar tomate` el sistema tendia a devolver descripciones sueltas en vez de una respuesta util.
+- Evidencia: `backend/app/rag_service.py` incorpora ahora una validacion tematica explicita antes de recuperar evidencia, devolviendo un rechazo amable cuando la consulta no esta relacionada con agricultura, agroecologia, cultivos o saberes asociados.
+- Evidencia: en el mismo archivo se reforzo la rama generativa y el fallback para preguntas procedimentales, de modo que consultas tipo `como sembrar`, `como cultivar` o `como manejar` prioricen una explicacion paso a paso y accionable.
+- Evidencia: tambien se endurecio la seleccion de fragmentos recuperados y se agrego una verificacion de evidencia suficiente antes de contestar, para que el backend no improvise respuestas cuando la recuperacion es debil dentro del limite de latencia sub-3 segundos.
+- Evidencia: posteriormente se elimino el selector visible de estilos (`Academico`, `Simple`, `Tecnico`) y la API quedo unificada en un solo tono conversacional, de modo que la experiencia se acerque mas a un chat natural y no a una plantilla elegible por el usuario.
 - Resultado: `corregido en codigo`
 - Uso futuro: `implementacion`, `pruebas`, `anexos`
