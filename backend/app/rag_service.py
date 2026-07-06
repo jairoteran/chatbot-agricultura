@@ -370,6 +370,7 @@ class RAGService:
         self._manifest_cache_signature: tuple[tuple[str, int, int], ...] | None = None
         self._loaded_manifest_signature: tuple[tuple[str, int, str], ...] | None = None
         self._document_topic_token_cache: dict[str, set[str]] = {}
+        self._document_title_cache: dict[str, str] = {}
         self._current_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         self.last_interaction_label = "Sin consultas"
         self.last_response_ms = 0
@@ -457,6 +458,7 @@ class RAGService:
     def _set_chunk_cache(self, chunk_cache: list[dict]) -> None:
         self.chunk_cache = chunk_cache
         self._document_topic_token_cache.clear()
+        self._document_title_cache.clear()
 
     def _configure_llm_client(self) -> None:
         gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -1767,10 +1769,84 @@ class RAGService:
         cleaned = re.sub(r"\b\d+\b$", "", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_,.;:")
 
+        if self._is_generic_file_title(cleaned, signature):
+            inferred_title = self._infer_document_title(file_name)
+            if inferred_title:
+                return inferred_title
+
         if not cleaned:
-            return file_name
+            inferred_title = self._infer_document_title(file_name)
+            return inferred_title or file_name
 
         return self._title_case_spanish(cleaned)
+
+    def _is_generic_file_title(self, title: str, signature: str) -> bool:
+        normalized_title = self._normalize_text(title)
+        tokens = [token for token in normalized_title.split() if token]
+        if not tokens:
+            return True
+        if len(tokens) <= 2 and any(token.isdigit() or token in {"all", "hd", "ecu"} for token in tokens):
+            return True
+        if re.fullmatch(r"[a-z]{2,6}\d{3,}", signature):
+            return True
+        if re.fullmatch(r"\d+[a-z]*", signature):
+            return True
+        if normalized_title in {"all", "hd", "ecu", "brblaa"}:
+            return True
+        return False
+
+    def _infer_document_title(self, file_name: str) -> str:
+        if file_name in self._document_title_cache:
+            return self._document_title_cache[file_name]
+
+        chunks = [
+            self._clean_ocr_text(chunk.get("text", ""))
+            for chunk in self.chunk_cache
+            if chunk.get("file_name") == file_name
+        ][:3]
+        text = " ".join(chunks)
+        title = self._extract_title_candidate(text)
+        self._document_title_cache[file_name] = title
+        return title
+
+    def _extract_title_candidate(self, text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", self._repair_mojibake(text or "")).strip()
+        if not cleaned:
+            return ""
+
+        search_area = cleaned[:1400]
+        candidates = []
+        patterns = [
+            r"\b(agricultura\s+(?:tradicional|organica|ecologica|familiar|sostenible|ancestral)[^.;:]{0,90})",
+            r"\b(cultivo\s+de\s+[^.;:]{4,90})",
+            r"\b(manual\s+de\s+[^.;:]{4,90})",
+            r"\b(saberes\s+ancestrales[^.;:]{0,90})",
+            r"\b(camellones\s+y\s+albarradas[^.;:]{0,90})",
+            r"\b(raices\s+y\s+tuberculos\s+andinos[^.;:]{0,90})",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, self._normalize_text(search_area), flags=re.IGNORECASE)
+            if match:
+                candidates.append(match.group(1))
+
+        if not candidates:
+            sentence_parts = re.split(r"(?<=[.!?])\s+|\s{2,}", search_area)
+            candidates.extend(sentence_parts[:5])
+
+        for candidate in candidates:
+            normalized_candidate = self._normalize_text(candidate)
+            candidate = re.sub(r"\b(pagina|page)\s*\d+\b", "", candidate, flags=re.IGNORECASE)
+            candidate = re.sub(r"\.{3,}.*$", "", candidate).strip(" -,:;.")
+            words = candidate.split()
+            if not (3 <= len(words) <= 14):
+                continue
+            if self._looks_like_ocr_noise(candidate):
+                continue
+            if not any(term in normalized_candidate for term in TOPIC_PRIORITY_TERMS | QUESTION_DOMAIN_TERMS):
+                continue
+            return self._title_case_spanish(candidate)
+
+        return ""
 
     def _document_source_label(self) -> str:
         return document_repository.describe_source()

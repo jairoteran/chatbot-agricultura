@@ -8,8 +8,8 @@ param(
     [string]$EnvFile = "",
     [string]$ServiceAccount = "",
     [string]$DocumentStorageBackend = "",
-    [string]$Memory = "2Gi",
-    [string]$Cpu = "2000m",
+    [string]$Memory = "4Gi",
+    [string]$Cpu = "4",
     [string]$TaskTimeout = "60m",
     [switch]$ExecuteNow
 )
