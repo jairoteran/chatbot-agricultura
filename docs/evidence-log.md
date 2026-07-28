@@ -45,6 +45,9 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: el frontend actualizo el nombre visible del asistente, el titulo HTML y el nombre del paquete a `agroj-especializado-frontend`.
 - Evidencia: los artefactos generados de `backend/storage/` dejaron de versionarse y quedaron ignorados para evitar que indices, caches y builds locales ensucien el codigo fuente.
 - Evidencia: se eliminaron archivos heredados de despliegue en Vercel (`vercel.json` y el adaptador `api/index.py`) porque la arquitectura vigente usa Google Cloud.
+- Evidencia: el `Dockerfile` del backend dejo de copiar `backend/storage/` y ahora crea la carpeta vacia dentro del contenedor, evitando fallos de build cuando los indices generados estan ignorados.
+- Evidencia: el `README.md` se reestructuro como guia principal de GitHub, incluyendo descripcion del sistema, arquitectura RAG, desarrollo local, despliegue cloud, gestion documental, subida masiva y guia para nuevos colaboradores.
+- Evidencia: la carpeta `docs/` se reorganizo con guias mas claras para arquitectura, contrato cloud, operacion de Cloud Run Jobs, glosario, estado del proyecto y memoria tecnica SENADI.
 - Decision: los documentos del corpus se tratan con cuidado porque pueden funcionar como evidencia o base documental; los nuevos PDFs de prueba no deben entrar automaticamente al repositorio.
 
 ## 2026-05-13 - Frontend listo para Hosting

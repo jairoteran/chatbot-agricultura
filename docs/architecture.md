@@ -1,345 +1,243 @@
-# Arquitectura objetivo
+# Arquitectura de AGROJ ESPECIALIZADO
 
-## Objetivo actual
+## Vision general
 
-Migrar el proyecto desde un enfoque basado en archivos locales versionados en Git hacia una arquitectura administrada en Google Cloud que soporte crecimiento, reindexado en vivo y mejor separacion de responsabilidades.
+AGROJ ESPECIALIZADO es una aplicacion web de consulta agricola basada en documentos. El sistema no responde desde conocimiento libre del modelo, sino que primero busca evidencia en un corpus de PDFs y luego genera una respuesta natural con IA.
 
-## Arquitectura recomendada hoy
+La arquitectura actual esta pensada para operar en Google Cloud, mantener el chat publico disponible y separar las tareas pesadas de reindexado del trafico normal de usuarios.
 
-- `Frontend`: Firebase Hosting
-- `Backend API`: Cloud Run
-- `Reindexado`: Cloud Run Jobs
-- `PDFs`: Cloud Storage
-- `Indices`: Cloud Storage
-- `Estado de documentos`: Firestore
-- `Estado de procesos`: Firestore
-- `Secrets`: Secret Manager
+```text
+Usuario
+  |
+  v
+Frontend React / Vite
+  |
+  v
+Backend FastAPI en Cloud Run
+  |
+  +--> Firestore: metadatos, sesiones y estado
+  |
+  +--> Cloud Storage: PDFs e indices
+  |
+  +--> LlamaIndex + embeddings: recuperacion RAG
+  |
+  v
+Gemini 2.5 Flash
+  |
+  v
+Respuesta final
+```
 
-## Convencion de nombres recomendada
+## Servicios principales
 
-Base sugerida del proyecto:
+| Capa | Servicio / Tecnologia | Responsabilidad |
+| --- | --- | --- |
+| Frontend | React + Vite | Interfaz del chat y panel `/gestion`. |
+| Backend | FastAPI + Uvicorn | API, autenticacion, RAG, documentos y estado. |
+| RAG | LlamaIndex | Fragmentacion, indice y recuperacion de informacion. |
+| Embeddings | `all-MiniLM-L6-v2` | Representacion semantica de textos y preguntas. |
+| Generacion | Gemini 2.5 Flash | Redaccion de respuestas naturales. |
+| Documentos | Cloud Storage | PDFs originales. |
+| Indices | Cloud Storage | Artefactos del indice activo y releases. |
+| Estado | Firestore | Metadatos, jobs, progreso y estado runtime. |
+| Secretos | Secret Manager | Claves de Gemini y secreto de sesion. |
+| Batch | Cloud Run Jobs | Reindexado manual fuera de la API web. |
 
-- `project_slug`: `tesis-producto`
-- `environment`: `dev`, `staging`, `prod`
-- `region`: `us-central1` mientras usemos bien el trial y el free tier cercano
+## Flujo RAG
 
-Recursos sugeridos para `dev`:
+```text
+PDFs cargados
+  -> extraccion de texto
+  -> division en fragmentos
+  -> embeddings por fragmento
+  -> indice consultable
 
-- `documents bucket`: `tesis-producto-dev-documents`
-- `indexes bucket`: `tesis-producto-dev-indexes`
-- `active index alias`: `current`
-- `Firestore documents collection`: `documents`
-- `Firestore jobs collection`: `reindex_jobs`
-- `Firestore runtime collection`: `runtime_state`
+Pregunta
+  -> validacion de dominio agricola
+  -> busqueda semantica y lexical
+  -> seleccion de evidencia
+  -> prompt con contexto
+  -> respuesta con Gemini
+```
 
-Prefijos sugeridos en Cloud Storage:
+El sistema intenta responder solo cuando encuentra evidencia suficiente. Si la pregunta esta fuera del dominio agricola o no hay soporte claro en documentos, el backend debe responder de forma honesta en lugar de inventar.
 
-- `documents/`
-- `indexes/current/`
-- `indexes/releases/`
+## Modelos utilizados
 
-## Responsabilidad por servicio
+El proyecto no entrena un modelo propio desde cero. Usa modelos ya entrenados:
 
-### Panel de gestion documental
+- `sentence-transformers/all-MiniLM-L6-v2`: convierte fragmentos y preguntas en embeddings.
+- `Gemini 2.5 Flash`: redacta respuestas a partir del contexto recuperado.
+- `Gemini 2.5 Flash Lite`: fallback configurado para contingencias.
+- `spaCy`: apoyo de analisis documental para entidades, temas y terminos clave.
 
-- vive dentro del frontend en la ruta `/gestion`
-- usa Google Sign-In para autenticar cuentas concretas
-- el backend valida el `credential` de Google y entrega una sesion de gestion documental propia
-- el acceso queda restringido a cuentas autorizadas mediante `ADMIN_EMAILS`
-- desde esta vista se permite:
-  - listar documentos del corpus
-  - subir PDFs manualmente
-  - eliminar PDFs
-  - disparar reindexado manual
+Interpretacion correcta:
 
-### Gobernanza documental actual y evolucion recomendada
+- El modelo generativo principal es Gemini.
+- El modelo de recuperacion semantica es `all-MiniLM-L6-v2`.
+- El framework RAG es LlamaIndex.
+- Lo que se actualiza al subir documentos es el indice, no los pesos de un modelo.
 
-Estado actual:
+## Gestion documental
 
-- el acceso operativo se controla mediante Google Sign-In y `ADMIN_EMAILS`
-- el sistema funciona con una lista blanca de cuentas autorizadas
-- no se presenta como una jerarquia de roles, sino como acceso autorizado a la gestion del corpus
-- tecnicamente eso resuelve autenticacion y operacion documental basica
+La ruta protegida es:
 
-Evolucion recomendada:
+```text
+/gestion
+```
 
-- evitar depender conceptualmente de un unico `administrador` o de roles rigidos
-- separar el flujo documental en etapas como:
-  - `subido`
-  - `en revision`
-  - `aprobado`
-  - `rechazado`
-  - `indexado`
-- permitir en una fase futura perfiles como:
-  - `colaborador`: sube documentos
-  - `revisor`: valida o rechaza
-  - `curador` o `gestor`: aprueba e incorpora al corpus indexado
-- si se implementan permisos futuros, priorizar permisos por accion antes que etiquetas rigidas de rol
+Permite:
 
-Motivo:
+- iniciar sesion con Google
+- validar acceso contra `ADMIN_EMAILS`
+- subir PDFs
+- listar documentos
+- eliminar documentos
+- lanzar reindexado manual
+- ver progreso del reindexado
 
-- mejora la gobernanza del conocimiento
-- reduce centralizacion operativa
-- representa mejor un flujo academico o comunitario de validacion de saberes
-- fortalece la justificacion metodologica de la tesis
+El lenguaje del sistema habla de gestion documental y cuentas autorizadas, no de una jerarquia rigida de administrador. Esto deja abierta una evolucion futura hacia flujos de curacion documental con colaboradores, revisores y validadores.
 
-### Politica de reindexado
+## Politica de reindexado
 
-- el backend HTTP ya no reindexa automaticamente cuando detecta cambios en los PDFs
-- si detecta diferencias entre manifiesto actual e indice publicado, marca el estado como `pendiente`
-- la reconstruccion del indice se ejecuta solo por accion manual:
-  - desde `POST /reindex`
-  - o desde el Cloud Run Job batch
-- esto evita que la API web se comporte como un proceso pesado de rebuild durante consultas normales
+Decision vigente:
 
-### Modelo NLP realmente utilizado
-
-El proyecto no usa un unico modelo NLP, sino una arquitectura `RAG` con dos capas principales:
-
-- `Gemini 2.5 Flash`:
-  - genera la respuesta final en lenguaje natural
-  - interpreta la pregunta del usuario
-  - redacta respuestas y resumenes a partir del contexto recuperado
-- `sentence-transformers/all-MiniLM-L6-v2`:
-  - genera embeddings semanticos de los documentos
-  - permite recuperar fragmentos relevantes por similitud
-  - se integra mediante `Hugging Face` y `llama-index`
-
-Interpretacion correcta para tesis o defensa:
-
-- el modelo de generacion principal es `Gemini 2.5 Flash`
-- el modelo de recuperacion semantica principal es `all-MiniLM-L6-v2`
-- por tanto, el sistema usa una arquitectura NLP hibrida, no un solo modelo aislado
-
-### Papel de Hugging Face, spaCy y NLTK
-
-- `Hugging Face`:
-  - ya participa en el proyecto mediante `sentence-transformers`
-  - hoy se usa para embeddings y recuperacion semantica, no como chatbot principal
-- `spaCy`:
-  - queda integrado como capa de enriquecimiento del corpus durante el reindexado
-  - extrae temas, entidades y terminos clave para registrar metadatos documentales
-  - si no existe un modelo entrenado de espanol instalado, el sistema usa un fallback ligero con vocabulario de dominio para no romper local ni cloud
-- `NLTK`:
-  - no esta integrado actualmente
-  - se mantiene fuera del runtime porque la limpieza/tokenizacion actual ya queda cubierta por spaCy, reglas propias y el pipeline RAG
-  - podria evaluarse despues solo si se necesita un recurso puntual de tokenizacion, stopwords o validacion linguistica
-
-### Corpus documental
-
-En este proyecto, el `corpus` es el conjunto organizado de documentos PDF que alimenta al sistema.
-
-Ese corpus:
-
-- contiene manuales, textos tecnicos, documentos historicos y materiales sobre agricultura y saberes ancestrales
-- se almacena en `Cloud Storage`
-- se registra en `Firestore` mediante metadatos y estado
-- se transforma en un indice consultable mediante el proceso de reindexado
-- registra estados documentales como `pending_index`, `indexed`, `deleted` y `failed`
-- puede guardar temas, entidades y terminos clave extraidos con `spaCy` o con el fallback de dominio
-
-Desde la perspectiva academica, esto permite describir el sistema no solo como un chatbot con PDFs, sino como un asistente construido sobre un corpus documental especializado.
-
-### Frontend publico
-
-Opcion ideal:
-
-- `Firebase Hosting`
-- servir el frontend React compilado
-- exponer el dominio publico del cliente
-- reescribir `/api/**` hacia `tesis-producto-api` en `us-central1` para evitar problemas de CORS entre frontend y backend
-
-Opcion operativa alternativa:
-
-- `Cloud Run` sirviendo el frontend estatico compilado
-- consumir la API publica de `Cloud Run` por URL completa
-- habilitar `CORS_ORIGINS` en la API para el dominio del frontend
-
-### Cloud Run
-
-- Exponer la API HTTP principal
-- Atender `chat`, `health` y futuras operaciones de gestion documental
-- Leer configuracion desde Secret Manager
-- Consultar Firestore para estado y metadatos
-- Leer el indice publicado en almacenamiento duradero
-- Mantener compatibilidad local mientras termina la migracion
-
-### Cloud Run Jobs
-
-- Ejecutar el reindexado fuera del ciclo normal de requests HTTP
-- Leer PDFs desde Cloud Storage
-- Reconstruir o actualizar el indice
-- Publicar artefactos nuevos del indice en Cloud Storage
-- Reportar progreso y resultado en Firestore
-- Reutilizar el entrypoint batch del backend en lugar de depender de FastAPI
-
-### Cloud Storage
-
-- Bucket para documentos PDF
-- Bucket o prefijo para artefactos del indice
-- Posible separacion futura entre entornos `dev`, `staging` y `prod`
-- Publicar una referencia estable al indice activo y permitir releases versionados
-
-### Firestore
-
-- Registrar documentos subidos
-- Registrar jobs de reindexado
-- Guardar estado de proceso, errores y timestamps
-- Servir como capa de coordinacion ligera en esta fase
-
-### Secret Manager
-
-- Guardar claves como `GEMINI_API_KEY` y `OPENAI_API_KEY`
-- Guardar configuraciones sensibles del backend
-- `GEMINI_FALLBACK_MODEL` no es secreto, pero permite definir un segundo modelo Gemini para contingencias de alta demanda
-
-## Variables de entorno base
-
-Variables ya previstas en el backend:
-
-- `APP_DEPLOYMENT_TARGET`
-- `DOCUMENT_STORAGE_BACKEND`
-- `INDEX_STORAGE_BACKEND`
-- `METADATA_BACKEND`
-- `PROCESS_STATE_BACKEND`
-- `GOOGLE_CLOUD_PROJECT`
-- `GOOGLE_CLOUD_REGION`
-- `DOCUMENTS_BUCKET`
-- `DOCUMENTS_PREFIX`
-- `INDEXES_BUCKET`
-- `INDEXES_PREFIX`
-- `ACTIVE_INDEX_NAME`
-- `FIRESTORE_DOCUMENTS_COLLECTION`
-- `FIRESTORE_JOBS_COLLECTION`
-- `FIRESTORE_RUNTIME_COLLECTION`
-- `ALLOW_RUNTIME_REINDEX`
-- `ENABLE_VECTOR_RETRIEVAL`
-- `GEMINI_MODEL`
-- `GEMINI_FALLBACK_MODEL`
-- `LLM_TIMEOUT_SECONDS`
-- `GOOGLE_AUTH_CLIENT_ID`
-- `ADMIN_EMAILS`
-- `ADMIN_BASE_PATH`
-- `ADMIN_SESSION_TTL_SECONDS`
-
-## Flujo objetivo de reindexado
-
-1. Un documento nuevo o actualizado se registra en el sistema.
-2. El PDF se guarda en Cloud Storage.
-3. Se crea o actualiza un registro de documento en Firestore.
-4. El sistema queda marcado como pendiente de reindexado.
-5. Una cuenta autorizada ejecuta manualmente el reindexado desde el panel de gestion documental o mediante Cloud Run Job.
-6. El job o endpoint manual lee los PDFs requeridos y genera el indice.
-7. El job o endpoint manual publica el nuevo indice en Cloud Storage.
-8. El proceso actualiza en Firestore el resultado del reindexado.
-9. La API en Cloud Run consume el indice vigente.
-
-## Decisiones tomadas
-
-### Decision 1
-
-Se prioriza arquitectura serverless administrada sobre VPS.
+- La API web no debe reindexar automaticamente.
+- Los cambios documentales dejan el indice como pendiente.
+- El reindexado se ejecuta manualmente desde `/gestion` o con Cloud Run Jobs.
+- El job batch reconstruye el indice y publica el resultado.
 
 Motivo:
 
-- mejor imagen profesional
-- mejor camino de escalado
-- menor carga operativa a largo plazo
+- evita que una consulta de usuario dispare procesos pesados
+- reduce timeouts en Cloud Run
+- permite monitorear progreso real
+- hace mas segura la operacion con cientos de PDFs
 
-### Decision 2
+## Almacenamiento
 
-El reindexado no debe depender del filesystem local del servicio web.
+### Documentos
 
-Motivo:
+```text
+gs://tesis-producto-dev-documents/documents/
+```
 
-- Cloud Run es stateless
-- el reindexado puede ser pesado
-- conviene separar trafico de usuarios y procesamiento batch
+Aqui viven los PDFs originales.
 
-### Decision 3
+### Indices
 
-En esta fase se usara Firestore antes que Cloud SQL.
+```text
+gs://tesis-producto-dev-indexes/indexes/
+```
 
-Motivo:
+Aqui viven:
 
-- mejor compatibilidad con el credito inicial y el trial
-- menor costo operativo temprano
-- suficiente para estado, trazabilidad y coordinacion inicial
+- manifiestos
+- chunk cache
+- archivos persistidos de LlamaIndex
+- puntero del indice activo
+- releases historicos
 
-### Decision 4
+### Metadatos
 
-La configuracion de infraestructura debe salir del codigo de dominio y centralizarse en settings.
+Firestore guarda:
 
-Motivo:
+- documentos registrados
+- estados `pending_index`, `indexed`, `failed`, `deleted`
+- jobs de reindexado
+- progreso del job
+- estado runtime del sistema
+- preguntas frecuentes calculadas desde uso real
 
-- facilita migracion por etapas
-- reduce acoplamiento a `backend/data` y `backend/storage`
-- hace mas clara la diferencia entre local y cloud
+## Variables importantes
 
-### Decision 5
+```text
+APP_DEPLOYMENT_TARGET=cloud-run
+DOCUMENT_STORAGE_BACKEND=gcs
+INDEX_STORAGE_BACKEND=gcs
+METADATA_BACKEND=firestore
+PROCESS_STATE_BACKEND=firestore
+DOCUMENTS_BUCKET=tesis-producto-dev-documents
+INDEXES_BUCKET=tesis-producto-dev-indexes
+ACTIVE_INDEX_NAME=current
+ALLOW_RUNTIME_REINDEX=false
+ENABLE_VECTOR_RETRIEVAL=true
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite
+```
 
-El reindexado del entorno desplegado debe ser manual y controlado desde gestion documental.
+## Frontend
 
-Motivo:
+El frontend se construye con React + Vite. Sus responsabilidades son:
 
-- reduce riesgo de rebuild pesado durante trafico normal
-- hace mas predecible el estado del indice
-- separa claramente consultas publicas de operaciones operativas
+- mostrar el chat publico
+- mostrar estado del backend
+- mantener historial local de conversaciones
+- abrir el menu movil
+- mostrar `/gestion`
+- realizar subida directa a Cloud Storage para PDFs grandes
+- consumir endpoints `/api/**`
 
-Nota operativa:
+En Cloud Run, el frontend se sirve como sitio estatico con Nginx y reescribe `/api/**` hacia el backend.
 
-- `ALLOW_RUNTIME_REINDEX=false` evita reconstrucciones dentro de la API web
-- `ENABLE_VECTOR_RETRIEVAL=true` permite que la API cargue el indice vectorial publicado y responda de forma mas parecida al entorno local
-- estas dos decisiones deben mantenerse separadas para no degradar cloud a `lexical-only`
+## Backend
 
-### Decision 6
+El backend FastAPI expone:
 
-La UI del acceso de gestion documental puede usar una capa visual propia, pero el click real debe seguir pasando por Google Identity Services.
+- `/health`
+- `/chat`
+- `/summarize-document`
+- `/reindex`
+- `/admin/config`
+- `/admin/session`
+- `/admin/documents`
 
-Motivo:
+Responsabilidades principales:
 
-- permite respetar el estilo visual del panel
-- evita romper el flujo real de autenticacion con intentos custom que no abren correctamente el acceso de Google
+- orquestar RAG
+- validar dominio agricola de preguntas
+- recuperar fragmentos relevantes
+- generar respuestas
+- administrar sesiones de gestion documental
+- crear sesiones de subida directa a GCS
+- lanzar Cloud Run Jobs
+- reportar estado operativo
 
-### Decision 7
+## Estrategia de escalabilidad
 
-El sistema debe describirse como una arquitectura `RAG` basada en corpus, no como un chatbot generativo aislado.
+Para uso normal, Cloud Run escala el frontend y el backend bajo demanda.
 
-Motivo:
+Para procesos pesados, Cloud Run Jobs permite:
 
-- refleja mejor la realidad tecnica del proyecto
-- aclara que las respuestas dependen de documentos recuperados
-- permite justificar de forma correcta el uso combinado de Gemini y embeddings de Hugging Face
+- mas memoria
+- mas CPU
+- timeout largo
+- ejecucion independiente del trafico web
 
-### Decision 8
+Con muchos documentos, el cuello de botella principal no es el chat sino el reindexado. Por eso el reindexado esta separado.
 
-La evolucion futura de la gestion documental debe priorizar flujo de curacion antes que un rol unico de administrador.
+## Limpieza del repositorio
 
-Motivo:
+No se versionan:
 
-- mejora trazabilidad y validacion de contenidos
-- es mas coherente con un proyecto sobre saberes ancestrales
-- abre camino a estados documentales y revision colaborativa
+- `backend/storage/`
+- `frontend/dist/`
+- `frontend/node_modules/`
+- `.venv/`
+- caches
+- logs
+- PDFs de prueba
 
-### Decision 9
+El codigo fuente queda separado de artefactos generados, algo importante para mantenimiento, colaboracion y proteccion formal del software.
 
-La interfaz visible debe hablar de `gestion documental` y `cuentas autorizadas`, no de un rol central de administrador.
+## Evolucion recomendada
 
-Motivo:
+Siguientes mejoras naturales:
 
-- alinea el producto con la recomendacion metodologica de evitar roles rigidos
-- mantiene el control operativo necesario para proteger el corpus
-- permite explicar el sistema como gobernanza documental basada en acceso autorizado
-- deja los nombres tecnicos internos como `admin` solo por compatibilidad de endpoints y configuracion existente
-
-## Evolucion prevista
-
-Cuando el producto necesite modelos de datos relacionales mas complejos, reportes, multiusuario avanzado o consistencia transaccional mas rica, evaluar migracion parcial o total de metadatos a `Cloud SQL PostgreSQL`.
-
-## Fuera de alcance por ahora
-
-- Kubernetes / GKE
-- microservicios separados por dominio
-- autenticacion completa
-- multi-tenant
-- pipeline CI/CD completo de produccion
+- curacion documental con estados mas detallados
+- roles por accion en lugar de etiquetas rigidas
+- OCR para PDFs escaneados
+- versionado mas visible de indices
+- panel de calidad documental
+- metricas de preguntas frecuentes por periodo
+- pruebas automatizadas del flujo RAG

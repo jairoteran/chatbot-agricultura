@@ -657,7 +657,7 @@ class RAGService:
 
             raise RuntimeError(
                 "No se encontro un indice persistido utilizable para este despliegue. "
-                "En Vercel debes incluir backend/storage actualizado en el repositorio o habilitar ALLOW_RUNTIME_REINDEX."
+                "Publica un indice en el backend configurado o habilita ALLOW_RUNTIME_REINDEX."
             )
 
         if not self.vector_backend_ready:

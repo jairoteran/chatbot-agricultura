@@ -16,7 +16,7 @@ COPY backend/requirements.indexing.txt ./requirements.indexing.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY backend/app ./app
-COPY backend/storage ./storage
+RUN mkdir -p ./storage
 
 EXPOSE 8080
 

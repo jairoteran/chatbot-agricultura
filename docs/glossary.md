@@ -1,193 +1,237 @@
 # Glosario
 
-## no-op
+Este glosario explica los terminos tecnicos del proyecto con un lenguaje practico.
 
-Significa `no operation`.
+## AGROJ ESPECIALIZADO
 
-En este proyecto, un `no-op` ocurre cuando se solicita un reindexado pero el sistema detecta que los PDFs no cambiaron y, por tanto, no necesita reconstruir el indice completo.
-
-Resultado practico:
-
-- no recalcula embeddings
-- no rehace el indice vectorial
-- responde rapido indicando que el indice ya estaba actualizado
-
-## job batch
-
-Es una ejecucion de una tarea en segundo plano, fuera del flujo normal de peticiones web.
-
-En este proyecto, el reindexado como `job batch` significa:
-
-- correr el proceso como tarea independiente
-- no depender de `uvicorn` ni de un endpoint HTTP para ejecutar toda la logica
-- usar un entrypoint como `python -m app.reindex_job`
-
-Ventajas:
-
-- mejor para procesos largos
-- mas adecuado para Cloud Run Jobs
-- separa trafico de usuarios de tareas pesadas
-
-## entrypoint batch
-
-Es el comando o modulo que inicia un proceso batch.
-
-En este proyecto:
-
-- `python -m app.reindex_job`
-
-Ese comando permite ejecutar el reindexado como proceso independiente del servidor web.
-
-## runtime state
-
-Es el estado operativo actual del sistema.
-
-En este proyecto, incluye datos como:
-
-- indice activo
-- origen del indice activo
-- ultimo estado del reindexado
-- ultimo `job_id` ejecutado
-
-Se guarda en Firestore dentro de `runtime_state`.
-
-## manifest
-
-Es un resumen estructurado de los PDFs que componen el indice.
-
-Incluye por archivo:
-
-- nombre
-- ruta relativa
-- tamano
-- fingerprint
-
-Sirve para detectar si hubo cambios reales en los documentos antes de decidir si hay que reconstruir el indice.
-
-## chunk cache
-
-Es una representacion serializada de los fragmentos de texto usados por el sistema.
-
-Cada fragmento guarda:
-
-- archivo origen
-- pagina
-- texto
-- tokens
-
-Sirve para:
-
-- responder consultas sin depender siempre del indice vectorial completo
-- acelerar algunos caminos de lectura
-
-## materializar un indice
-
-Significa descargar o preparar localmente los archivos necesarios de un indice para poder usarlos.
-
-En este proyecto, cuando el indice vive en GCS:
-
-- se descarga a un cache local
-- luego el backend lo usa desde ese directorio runtime
-
-## corpus
-
-Es el conjunto organizado de documentos que alimenta al sistema.
-
-En este proyecto, el corpus esta compuesto por PDFs sobre agricultura, agroecologia y saberes ancestrales.
-
-Su valor practico es que:
-
-- define la base real de conocimiento del asistente
-- permite justificar academicamente de donde sale la informacion
-- separa el sistema de un chatbot generativo libre
-
-Cada documento del corpus puede tener estado operativo:
-
-- `pending_index`: cargado o actualizado, pero aun no incorporado al indice vigente
-- `indexed`: incorporado al indice vigente y disponible para consulta
-- `deleted`: eliminado del corpus operativo
-- `failed`: no pudo procesarse correctamente
-
-## gestion documental
-
-Es el conjunto de operaciones protegidas para mantener el corpus.
-
-En este proyecto incluye:
-
-- subir PDFs
-- listar documentos
-- eliminar documentos
-- ejecutar reindexado manual
-
-No debe presentarse como una jerarquia rigida de roles. En la fase actual se controla mediante cuentas autorizadas.
-
-## cuentas autorizadas
-
-Son las cuentas de Google permitidas para operar la gestion documental.
-
-En el backend se configuran con `ADMIN_EMAILS` por compatibilidad tecnica, pero metodologicamente representan acceso autorizado al corpus, no necesariamente un rol unico de administrador.
+Nombre del software. Es un asistente agricola que responde preguntas usando una base documental propia.
 
 ## RAG
 
 Significa `Retrieval-Augmented Generation`.
 
-En este proyecto quiere decir que el sistema:
+En este proyecto quiere decir:
 
-1. recupera fragmentos relevantes del corpus
-2. envia ese contexto al modelo generativo
-3. redacta una respuesta usando la informacion recuperada
+1. buscar fragmentos relevantes en documentos
+2. entregar esos fragmentos al modelo generativo
+3. redactar una respuesta usando esa evidencia
 
-## embeddings
+No es un chatbot libre: responde apoyado en documentos.
 
-Son representaciones numericas del texto que permiten comparar similitud semantica.
+## Corpus
 
-En este proyecto:
+Conjunto organizado de documentos que alimenta al sistema.
 
-- se usan para indexar documentos
-- ayudan a recuperar los fragmentos mas relacionados con una pregunta
-- el modelo principal de embeddings es `sentence-transformers/all-MiniLM-L6-v2`
+En AGROJ, el corpus esta compuesto por PDFs sobre agricultura, agroecologia, cultivos, territorio rural y saberes ancestrales.
+
+## Embeddings
+
+Representaciones numericas del texto.
+
+Sirven para comparar significados. Por ejemplo, permiten detectar que una pregunta sobre "sembrar papa" esta relacionada con fragmentos que hablen de cultivo, semilla, suelo o manejo agricola.
+
+Modelo usado:
+
+```text
+sentence-transformers/all-MiniLM-L6-v2
+```
+
+## LlamaIndex
+
+Framework usado para construir el flujo RAG.
+
+En el proyecto ayuda a:
+
+- dividir documentos en fragmentos
+- crear indices
+- conectar embeddings
+- recuperar informacion relevante
 
 ## Gemini
 
-Es el modelo generativo principal del proyecto.
+Modelo generativo principal.
 
-En este caso se usa `Gemini 2.5 Flash` para:
+Se usa para redactar respuestas naturales a partir de la pregunta y los fragmentos recuperados.
 
-- interpretar preguntas
-- redactar respuestas
-- generar resumenes a partir del contexto recuperado
+Modelo principal:
 
-## Hugging Face
+```text
+gemini-2.5-flash
+```
 
-Es el ecosistema usado indirectamente para la capa de embeddings.
+Modelo fallback:
 
-En este proyecto aparece mediante:
-
-- `sentence-transformers`
-- `llama-index-embeddings-huggingface`
-
-Su papel actual no es el chatbot final, sino la recuperacion semantica del corpus.
+```text
+gemini-2.5-flash-lite
+```
 
 ## spaCy
 
-Es una libreria de NLP orientada a produccion.
+Libreria de procesamiento de lenguaje natural.
 
-En este proyecto se usa como capa de enriquecimiento del corpus para:
+Se usa para enriquecer documentos con:
 
-- extraer entidades
-- detectar temas y terminos clave
-- registrar metadatos documentales durante el reindexado
+- entidades
+- temas
+- terminos clave
 
-Si no hay un modelo entrenado de espanol instalado, el sistema usa un fallback propio con vocabulario de dominio para mantener el flujo estable.
+Si no hay un modelo de espanol disponible, el sistema usa reglas propias de dominio para no bloquear el flujo.
 
 ## NLTK
 
-Es una libreria clasica de procesamiento de lenguaje natural.
+Libreria clasica de NLP.
 
-Actualmente no forma parte del sistema, pero podria servir en el futuro para:
+No forma parte del runtime actual. Podria evaluarse en el futuro para stopwords, tokenizacion o limpieza adicional, pero hoy las necesidades estan cubiertas por spaCy, reglas propias y embeddings.
 
-- stopwords personalizadas
-- tokenizacion adicional
-- limpieza o normalizacion basica del texto
+## Cloud Run
 
-Por ahora no se agrega al runtime porque `spaCy`, las reglas propias de limpieza y `sentence-transformers` cubren mejor las necesidades actuales.
+Servicio de Google Cloud que ejecuta contenedores web.
+
+En AGROJ ejecuta:
+
+- backend API
+- frontend estatico servido con Nginx
+
+## Cloud Run Jobs
+
+Servicio para ejecutar tareas batch.
+
+En AGROJ ejecuta el reindexado, que puede tardar bastante cuando hay muchos PDFs.
+
+## Cloud Storage
+
+Almacenamiento de objetos de Google Cloud.
+
+En AGROJ guarda:
+
+- PDFs originales
+- indices generados
+- manifiestos
+- chunk cache
+
+## Firestore
+
+Base de datos NoSQL de Google Cloud.
+
+En AGROJ guarda:
+
+- metadatos de documentos
+- estado de reindexado
+- progreso
+- estado runtime
+- preguntas frecuentes
+
+## Secret Manager
+
+Servicio para guardar secretos.
+
+En AGROJ protege:
+
+- `GEMINI_API_KEY`
+- `ADMIN_SESSION_SECRET`
+
+## Reindexado
+
+Proceso que reconstruye el indice consultable a partir de los PDFs.
+
+Incluye:
+
+- leer PDFs
+- extraer texto
+- dividir fragmentos
+- calcular embeddings
+- construir indice
+- publicar artefactos
+- actualizar Firestore
+
+## No-op
+
+Significa `no operation`.
+
+Ocurre cuando se pide reindexar, pero el sistema detecta que los documentos no cambiaron. En ese caso evita reconstruir todo.
+
+## Manifest
+
+Archivo que resume que documentos forman parte del indice.
+
+Sirve para saber:
+
+- que PDFs fueron considerados
+- si cambiaron archivos
+- si el indice esta actualizado
+
+## Chunk cache
+
+Archivo con fragmentos procesados del corpus.
+
+Sirve para:
+
+- recuperar texto rapidamente
+- responder con fallback lexical
+- evitar releer PDFs en cada consulta
+
+## Indice activo
+
+Version del indice que usa actualmente la API.
+
+En cloud se apunta mediante un alias o puntero estable, por ejemplo `current`.
+
+## Materializar un indice
+
+Preparar localmente un indice que vive en Cloud Storage para que el backend pueda usarlo.
+
+Ejemplo:
+
+```text
+GCS -> cache local runtime -> RAGService
+```
+
+## Gestion documental
+
+Area protegida del sistema para mantener el corpus.
+
+Ruta:
+
+```text
+/gestion
+```
+
+Permite subir, revisar, eliminar documentos y lanzar reindexado.
+
+## Cuentas autorizadas
+
+Cuentas de Google permitidas para entrar a `/gestion`.
+
+Se configuran con:
+
+```text
+ADMIN_EMAILS
+```
+
+## Estado `pending_index`
+
+El documento existe, pero aun no entra al indice activo.
+
+## Estado `indexed`
+
+El documento ya forma parte del indice activo y puede aparecer en respuestas.
+
+## Estado `failed`
+
+El documento no pudo procesarse correctamente.
+
+## Estado `deleted`
+
+El documento fue eliminado del corpus operativo.
+
+## Fallback
+
+Respuesta alternativa cuando el flujo principal no esta disponible.
+
+Ejemplo:
+
+- Gemini tarda demasiado
+- no hay evidencia suficiente
+- el indice vectorial no esta listo
+
+El fallback debe ser claro y honesto, no inventar informacion.

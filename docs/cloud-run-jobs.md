@@ -1,289 +1,308 @@
-# Cloud Run y Cloud Run Jobs
+# Operacion en Cloud Run y Cloud Run Jobs
 
-## Objetivo
+Esta guia explica como construir, desplegar y monitorear AGROJ ESPECIALIZADO en Google Cloud.
 
-Preparar una sola imagen de contenedor reutilizable para:
+## Servicios desplegados
 
-- `Cloud Run` como API HTTP
-- `Cloud Run Jobs` como proceso batch de reindexado
+| Servicio | Nombre actual | Funcion |
+| --- | --- | --- |
+| Backend API | `tesis-producto-api` | API FastAPI, chat, salud y gestion documental. |
+| Frontend | `tesis-producto-frontend` | Sitio React compilado y servido con Nginx. |
+| Reindexado | `tesis-producto-reindex` | Cloud Run Job para reconstruir el indice documental. |
 
-## Imagen actual
+Region:
+
+```text
+us-central1
+```
+
+Proyecto:
+
+```text
+project-838503ae-99e5-4041-837
+```
+
+## Imagen del backend
 
 Archivo:
 
-- `backend/Dockerfile`
-- `backend/.dockerignore`
-- `backend/cloudrun.env.yaml.example`
-- `backend/cloudbuild.backend.yaml`
+```text
+backend/Dockerfile
+```
 
-La imagen actual:
+La imagen:
 
+- usa Python 3.12 slim
 - instala dependencias del backend
-- copia `app/`
-- copia `storage/`
-- arranca por defecto la API con `uvicorn`
+- copia `backend/app`
+- crea `storage/` vacio para runtime
+- no copia PDFs
+- no copia indices generados
+- arranca la API con Uvicorn
 
-Nota:
-
-- ahora la imagen ya no copia `backend/data/`
-- el backend cloud asume que los documentos viven en `Cloud Storage`
-
-## Uso previsto
-
-### Cloud Run service
-
-La API usa el comando por defecto del contenedor:
+Comando por defecto:
 
 ```text
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
-### Cloud Run Job
+## Imagen del frontend
 
-El job debe sobrescribir el comando para ejecutar:
+Archivo:
 
 ```text
-python -m app.reindex_job
+frontend/Dockerfile
 ```
 
-## Estado actual
+La imagen:
 
-La imagen ya sirve para pruebas y despliegue inicial.
+- compila React + Vite
+- sirve archivos estaticos con Nginx
+- mantiene rutas `/api/**` hacia el backend
 
-Supuestos actuales:
+## Build del backend
 
-- `INDEX_STORAGE_BACKEND=gcs`
-- `METADATA_BACKEND=firestore`
-- `PROCESS_STATE_BACKEND=firestore`
-- `DOCUMENT_STORAGE_BACKEND=gcs`
-
-Implicacion:
-
-- la API y el Cloud Run Job toman los PDFs desde el bucket `tesis-producto-dev-documents`
-- `backend/data/` ya queda como respaldo local para desarrollo fuera de Cloud Run
-
-## Variables de entorno minimas
-
-Para Cloud Run service y Cloud Run Jobs:
-
-- `APP_DEPLOYMENT_TARGET=cloud-run`
-- `DOCUMENT_STORAGE_BACKEND=gcs`
-- `INDEX_STORAGE_BACKEND=gcs`
-- `METADATA_BACKEND=firestore`
-- `PROCESS_STATE_BACKEND=firestore`
-- `GOOGLE_CLOUD_PROJECT=project-838503ae-99e5-4041-837`
-- `GOOGLE_CLOUD_REGION=us-central1`
-- `DOCUMENTS_BUCKET=tesis-producto-dev-documents`
-- `DOCUMENTS_PREFIX=documents`
-- `INDEXES_BUCKET=tesis-producto-dev-indexes`
-- `INDEXES_PREFIX=indexes`
-- `ACTIVE_INDEX_NAME=current`
-- `FIRESTORE_DOCUMENTS_COLLECTION=documents`
-- `FIRESTORE_JOBS_COLLECTION=reindex_jobs`
-- `FIRESTORE_RUNTIME_COLLECTION=runtime_state`
-- `ALLOW_RUNTIME_REINDEX="true"`
-
-Ademas, para respuestas generativas:
-
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL=gemini-2.5-flash`
-
-## Comandos orientativos
-
-### Construir imagen
-
-Desde la raiz del proyecto:
-
-```powershell
-gcloud builds submit . --config backend/cloudbuild.backend.yaml --substitutions _IMAGE=us-central1-docker.pkg.dev/project-838503ae-99e5-4041-837/tesis-producto/backend:latest
-```
-
-Script auxiliar del repo:
+Desde la raiz:
 
 ```powershell
 .\scripts\build-backend-image.ps1
 ```
 
-## Desplegar API en Cloud Run
+El build usa:
 
-```powershell
-gcloud run deploy tesis-producto-api `
-  --image us-central1-docker.pkg.dev/project-838503ae-99e5-4041-837/tesis-producto/backend:latest `
-  --region us-central1 `
-  --platform managed `
-  --allow-unauthenticated
+```text
+backend/cloudbuild.backend.yaml
 ```
 
-Script auxiliar del repo:
+`.gcloudignore` evita subir al contexto:
+
+- PDFs
+- indices generados
+- caches
+- `.venv`
+- `node_modules`
+- docs
+- logs
+
+## Deploy del backend API
 
 ```powershell
-.\scripts\deploy-backend-api.ps1
+.\scripts\deploy-backend-api.ps1 `
+  -GeminiApiSecret GEMINI_API_KEY `
+  -AdminSessionSecret ADMIN_SESSION_SECRET `
+  -DocumentStorageBackend gcs `
+  -AllowRuntimeReindex "false" `
+  -Memory "4Gi" `
+  -Cpu "4" `
+  -Timeout "120s"
 ```
 
-El script despliega la API con `1Gi` de memoria por defecto, porque `512Mi` resulto insuficiente durante la inicializacion real del servicio en Cloud Run.
-Ademas, el script fuerza `ALLOW_RUNTIME_REINDEX=false` para la API cloud, de modo que el servicio web no intente reindexar ni cargar el backend pesado de embeddings en vivo como si fuera el job batch.
-El retrieval vectorial de la API se controla aparte con `ENABLE_VECTOR_RETRIEVAL=true`; esa variable permite cargar el indice vectorial publicado sin permitir rebuilds dentro del servicio web.
+Regla importante:
 
-Con el bloque de gestion documental actual tambien debes asegurar:
+- `ALLOW_RUNTIME_REINDEX=false` en la API.
+- La API consulta indices publicados.
+- La API no debe reconstruir indices pesados durante trafico web.
 
-- `GOOGLE_AUTH_CLIENT_ID` configurado en `backend/cloudrun.env.yaml` o pasado al script
-- `ADMIN_EMAILS` con la lista de correos autorizados
-- `ADMIN_SESSION_SECRET` disponible desde Secret Manager si vas a usar acceso protegido en cloud
-- `ENABLE_VECTOR_RETRIEVAL=true` si quieres que cloud recupere fragmentos con el indice vectorial igual que local
+## Deploy del job de reindexado
 
-Si ya tienes un secreto creado en Secret Manager para Gemini:
+Para un volumen normal:
 
 ```powershell
-.\scripts\deploy-backend-api.ps1 -GeminiApiSecret GEMINI_API_KEY
+.\scripts\deploy-reindex-job.ps1 `
+  -DocumentStorageBackend gcs `
+  -Memory "4Gi" `
+  -Cpu "4" `
+  -TaskTimeout "60m"
 ```
 
-Si quieres desplegar ya con documentos en `GCS`:
+Para un volumen grande, por ejemplo cientos de PDFs:
 
 ```powershell
-.\scripts\deploy-backend-api.ps1 -GeminiApiSecret GEMINI_API_KEY -DocumentStorageBackend gcs
+.\scripts\deploy-reindex-job.ps1 `
+  -DocumentStorageBackend gcs `
+  -Memory "8Gi" `
+  -Cpu "4" `
+  -TaskTimeout "43200s"
 ```
 
-## Crear Cloud Run Job
+`43200s` equivale a 12 horas.
+
+## Ejecutar reindexado
 
 ```powershell
-gcloud run jobs create tesis-producto-reindex `
-  --image us-central1-docker.pkg.dev/project-838503ae-99e5-4041-837/tesis-producto/backend:latest `
-  --region us-central1 `
-  --command python `
-  --args=-m,app.reindex_job
+gcloud run jobs execute tesis-producto-reindex `
+  --region us-central1
 ```
 
-Script auxiliar del repo:
+Ver ejecuciones:
 
 ```powershell
-Copy-Item backend\cloudrun.env.yaml.example backend\cloudrun.env.yaml
-.\scripts\deploy-reindex-job.ps1
+gcloud run jobs executions list `
+  --job tesis-producto-reindex `
+  --region us-central1
 ```
 
-Si el job ya debe leer los PDFs desde el bucket:
+Describir una ejecucion:
 
 ```powershell
-.\scripts\deploy-reindex-job.ps1 -DocumentStorageBackend gcs
+gcloud run jobs executions describe tesis-producto-reindex-XXXXX `
+  --region us-central1
 ```
 
-El script del job ahora despliega con `2Gi` de memoria por defecto, porque `512Mi` resulto insuficiente para el reindexado real con documentos en `GCS` y reconstruccion de embeddings/indice.
-Tambien despliega con `2 vCPU` y `60m` de `task timeout` por defecto, porque `1 vCPU` y `10m` resultaron insuficientes para el rebuild completo leyendo documentos desde `GCS`.
-
-## Ejecutar Cloud Run Job
+## Logs del reindexado
 
 ```powershell
-gcloud run jobs execute tesis-producto-reindex --region us-central1
+gcloud logging read `
+  'resource.type="cloud_run_job" AND resource.labels.job_name="tesis-producto-reindex"' `
+  --limit 50 `
+  --format "value(timestamp,textPayload)"
 ```
 
-Si quieres crear o actualizar el job y ejecutarlo enseguida:
+Para una ejecucion concreta:
 
 ```powershell
-.\scripts\deploy-reindex-job.ps1 -ExecuteNow
+gcloud logging read `
+  'resource.type="cloud_run_job" AND resource.labels.job_name="tesis-producto-reindex" AND labels."run.googleapis.com/execution_name"="tesis-producto-reindex-XXXXX"' `
+  --limit 50 `
+  --format "value(timestamp,textPayload)"
 ```
 
-## Operacion manual desde el panel de gestion documental
-
-Con la version actual del proyecto:
-
-- subir o eliminar PDFs desde `/gestion` ya no dispara reindexado automatico
-- el backend marca el indice como pendiente cuando detecta cambios
-- una cuenta autorizada debe ejecutar manualmente `Reindexar ahora` desde el panel
-- como alternativa operativa, tambien puede ejecutarse el Cloud Run Job `tesis-producto-reindex`
-
-Esto deja el flujo cloud alineado con la decision de no reconstruir el indice durante trafico normal de la API web.
-
-## Frontend en Firebase Hosting
-
-La arquitectura objetivo de este repo deja el frontend en `Firebase Hosting` y mantiene el backend HTTP en `Cloud Run`.
-
-Configuracion incluida en la raiz del repo:
-
-- `firebase.json`
-- `.firebaserc`
-- `scripts/deploy-frontend-hosting.ps1`
-
-La estrategia usada es:
-
-- servir `frontend/dist` como sitio estatico
-- reescribir `/api/**` hacia `tesis-producto-api` en `us-central1`
-
-Eso permite que el frontend publicado siga usando rutas relativas como `/api/chat` y evita configurar `CORS` para un dominio frontend separado.
-
-Despliegue:
+## Build y deploy del frontend
 
 ```powershell
-.\scripts\deploy-frontend-hosting.ps1
+.\scripts\build-frontend-image.ps1 `
+  -ApiBaseUrl "/api" `
+  -AdminBasePath "/gestion"
+
+.\scripts\deploy-frontend-cloudrun.ps1
+```
+
+URL esperada:
+
+```text
+https://tesis-producto-frontend-1025954944056.us-central1.run.app
+```
+
+## Subida masiva de documentos
+
+Subir una carpeta de PDFs:
+
+```powershell
+gcloud storage cp "C:\ruta\a\documentos\*.pdf" `
+  gs://tesis-producto-dev-documents/documents/
+```
+
+Con subcarpetas:
+
+```powershell
+gcloud storage cp "C:\ruta\a\documentos\**" `
+  gs://tesis-producto-dev-documents/documents/ `
+  --recursive
+```
+
+Despues de subir, ejecutar reindexado.
+
+## Monitoreo por health
+
+```powershell
+Invoke-RestMethod -Method Get `
+  -Uri "https://tesis-producto-api-1025954944056.us-central1.run.app/health" |
+  ConvertTo-Json -Depth 10
+```
+
+Campos utiles:
+
+```text
+status
+index_ready
+indexed_file_count
+document_storage_backend
+index_storage_backend
+metadata_backend
+runtime_last_reindex_status
+runtime_reindex_progress
+runtime_reindex_stage
+runtime_reindex_total_documents
+runtime_reindex_processed_documents
+last_generation_status
+```
+
+Monitor simple:
+
+```powershell
+while ($true) {
+  Clear-Host
+  $h = Invoke-RestMethod -Method Get -Uri "https://tesis-producto-api-1025954944056.us-central1.run.app/health"
+  [pscustomobject]@{
+    Status = $h.runtime_last_reindex_status
+    Progress = "$($h.runtime_reindex_progress)%"
+    Stage = $h.runtime_reindex_stage
+    Processed = "$($h.runtime_reindex_processed_documents)/$($h.runtime_reindex_total_documents)"
+    Indexed = $h.indexed_file_count
+  }
+  Start-Sleep -Seconds 30
+}
 ```
 
 ## Secretos
 
-En esta fase, el archivo `backend/cloudrun.env.yaml` no incluye secretos.
+Secretos esperados:
 
-Siguiente mejora recomendada:
-
-- mover `GEMINI_API_KEY` a Secret Manager
-- pasar el secreto al servicio/job con `--set-secrets`
-
-Para la API en Cloud Run ya quedo preparado el script `scripts/deploy-backend-api.ps1` para aceptar:
-
-- `-GeminiApiSecret GEMINI_API_KEY`
-
-Tambien se agrego un script auxiliar para crear o actualizar el secreto:
-
-```powershell
-.\scripts\set-gemini-secret.ps1 -SecretValue "TU_CLAVE_REAL"
+```text
+GEMINI_API_KEY
+ADMIN_SESSION_SECRET
 ```
 
-Y luego desplegar la API usando ese secreto:
+Crear o actualizar secreto:
 
 ```powershell
-.\scripts\deploy-backend-api.ps1 -GeminiApiSecret GEMINI_API_KEY
+.\scripts\set-gemini-secret.ps1 -SecretId GEMINI_API_KEY -SecretValue "TU_CLAVE"
 ```
 
-Mientras eso no este hecho, no versionar un archivo `cloudrun.env.yaml` con claves reales.
+Para `ADMIN_SESSION_SECRET`, usar un valor largo y aleatorio.
 
-## Siguiente mejora prevista
+## Problemas comunes
 
-La siguiente evolucion natural es:
+### Build falla por `backend/storage`
 
-1. subir los PDFs con `scripts/sync-documents-to-gcs.ps1`
-2. desplegar el job con `-DocumentStorageBackend gcs`
-3. ejecutar un reindexado cloud contra los documentos del bucket
-4. desplegar la API con `-DocumentStorageBackend gcs`
-5. mantener la imagen sin `backend/data/` embebido y usar `backend/data/` solo para trabajo local
+El Dockerfile ya no debe copiar `backend/storage`. Esa carpeta contiene artefactos generados y esta ignorada.
 
-## Migracion recomendada de documentos
+La imagen correcta crea la carpeta:
 
-Orden sugerido para cambiar a documentos cloud sin romper la API:
+```dockerfile
+RUN mkdir -p ./storage
+```
 
-1. subir los PDFs actuales al bucket
+### Job falla por memoria
+
+Subir memoria:
 
 ```powershell
-.\scripts\sync-documents-to-gcs.ps1
+.\scripts\deploy-reindex-job.ps1 -DocumentStorageBackend gcs -Memory "8Gi" -Cpu "4" -TaskTimeout "43200s"
 ```
 
-Si quieres limpiar del bucket archivos viejos que no sean PDFs sincronizados por el script:
+### Job falla por timeout
+
+Subir `TaskTimeout`. Cloud Run Jobs soporta timeouts largos; para paquetes grandes usar 6 a 12 horas.
+
+### API tarda en preparar sistema
+
+Revisar:
 
 ```powershell
-.\scripts\sync-documents-to-gcs.ps1 -DeleteUnmatchedDestinationObjects
+Invoke-RestMethod -Method Get -Uri "https://tesis-producto-api-1025954944056.us-central1.run.app/health" |
+  ConvertTo-Json -Depth 10
 ```
 
-2. actualizar el Cloud Run Job para que tome los documentos desde `GCS`
+Si el indice activo existe en GCS, la API debe poder arrancar usando el indice publicado sin reindexar.
 
-```powershell
-.\scripts\deploy-reindex-job.ps1 -DocumentStorageBackend gcs
-```
+## Orden recomendado de despliegue
 
-3. ejecutar el job de reindexado
-
-```powershell
-gcloud run jobs execute tesis-producto-reindex --region us-central1
-```
-
-4. desplegar la API usando tambien `DOCUMENT_STORAGE_BACKEND=gcs`
-
-```powershell
-.\scripts\deploy-backend-api.ps1 -GeminiApiSecret GEMINI_API_KEY -DocumentStorageBackend gcs
-```
-
-5. validar `/health` y luego probar consultas reales
+1. Construir backend.
+2. Desplegar backend API.
+3. Desplegar o actualizar job de reindexado.
+4. Construir frontend.
+5. Desplegar frontend.
+6. Ejecutar reindexado si cambiaron documentos.
+7. Revisar `/health`.
+8. Probar una pregunta en el chat.

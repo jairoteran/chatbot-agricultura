@@ -19,8 +19,6 @@ def _detect_deployment_target() -> str:
 
     if os.getenv("K_SERVICE"):
         return "cloud-run"
-    if os.getenv("VERCEL") == "1":
-        return "vercel"
     if os.getenv("RENDER") == "true":
         return "render"
     if os.getenv("RAILWAY_ENVIRONMENT"):

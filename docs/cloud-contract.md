@@ -1,177 +1,257 @@
-# Contrato cloud del backend
+# Contrato cloud
+
+Este documento define como AGROJ ESPECIALIZADO organiza documentos, indices y estado operativo cuando corre en Google Cloud.
 
 ## Objetivo
 
-Definir una estructura estable para que el backend pueda migrar desde archivos locales a Google Cloud sin rehacer toda la logica RAG.
+Separar la logica RAG del almacenamiento local. El backend debe poder funcionar con:
 
-## Backends previstos
+- documentos locales durante desarrollo
+- documentos en Cloud Storage durante despliegue
+- indices locales durante pruebas
+- indices publicados en Cloud Storage en produccion
+- metadatos en Firestore cuando se opera en cloud
 
-- `DOCUMENT_STORAGE_BACKEND=local|gcs`
-- `INDEX_STORAGE_BACKEND=local|gcs`
-- `METADATA_BACKEND=none|firestore`
-- `PROCESS_STATE_BACKEND=none|firestore`
+## Backends soportados
 
-## Contratos implementados en codigo
+```text
+DOCUMENT_STORAGE_BACKEND=local|gcs
+INDEX_STORAGE_BACKEND=local|gcs
+METADATA_BACKEND=none|firestore
+PROCESS_STATE_BACKEND=none|firestore
+```
 
-Archivos relevantes:
+## Repositorios del backend
 
-- `backend/app/settings.py`
-- `backend/app/index_models.py`
-- `backend/app/cloud_layout.py`
-- `backend/app/index_repository.py`
+| Archivo | Responsabilidad |
+| --- | --- |
+| `document_repository.py` | Lee documentos desde disco local o GCS. |
+| `index_repository.py` | Lee y publica indices en local o GCS. |
+| `metadata_repository.py` | Guarda documentos, jobs y runtime state. |
+| `cloud_layout.py` | Centraliza nombres de buckets, prefijos y rutas cloud. |
+| `index_models.py` | Define manifiestos, releases y referencias de indice. |
+| `metadata_models.py` | Define modelos documentales y de proceso. |
 
-## Repositorio de indices
+## Cloud Storage
 
-Ya existe una capa de repositorio para indices:
+### Bucket de documentos
 
-- `LocalIndexRepository`
-- `GCSIndexRepository`
+```text
+gs://tesis-producto-dev-documents/documents/
+```
 
-Objetivo:
+Uso:
 
-- que el servicio RAG deje de depender de leer siempre desde `backend/storage/`
-- permitir que el indice activo se materialice en un directorio local temporal aunque su origen sea Cloud Storage
-- reutilizar el mismo contrato de manifiesto y chunk cache en local y en cloud
+- guardar PDFs originales
+- conservar rutas relativas
+- permitir subida directa de archivos grandes
 
-## Repositorio de metadatos
+Ejemplo:
 
-Ya existe una capa de metadatos y estado:
+```text
+documents/manual-papa.pdf
+documents/agroecologia/guia-suelos.pdf
+```
 
-- `NoopMetadataRepository`
-- `FirestoreMetadataRepository`
+### Bucket de indices
 
-Modelos implementados:
+```text
+gs://tesis-producto-dev-indexes/indexes/
+```
 
-- `DocumentRecord`
-- `ReindexJobRecord`
-- `RuntimeStateRecord`
+Uso:
 
-Objetivo:
+- guardar indice activo
+- guardar releases historicos
+- guardar manifiesto
+- guardar chunk cache
+- guardar archivos persistidos de LlamaIndex
 
-- registrar documentos indexados
-- registrar jobs de reindexado
-- mantener estado runtime del indice activo
-- permitir que `/health` refleje estado operativo mas alla del filesystem local
+Layout recomendado:
 
-## Entry point batch
+```text
+indexes/
+  active-index.json
+  current/
+    manifest.json
+    chunk_cache.json
+    docstore.json
+    index_store.json
+    default__vector_store.json
+  releases/
+    20260728-143044/
+      manifest.json
+      chunk_cache.json
+      ...
+```
 
-Ya existe un entrypoint batch para reindexado:
+## Indice activo
 
-- `python -m app.reindex_job`
+El backend no debe depender de un release escrito a mano. Debe leer un puntero estable:
 
-Objetivo:
+```text
+indexes/active-index.json
+```
 
-- ejecutar reindexado sin levantar `uvicorn`
-- reutilizar exactamente el mismo `RAGService`
-- preparar el camino para `Cloud Run Jobs`
+Ese puntero indica:
 
-## Directorio de cache cloud
+- nombre del indice activo
+- ubicacion del manifiesto
+- ubicacion del chunk cache
+- prefijo de artefactos
+- fecha de actualizacion
+- origen del indice
 
-Cuando el backend use `INDEX_STORAGE_BACKEND=gcs`, la sincronizacion del indice activo se hace sobre un cache local configurable:
+## Manifest
 
-- `CLOUD_INDEX_CACHE_DIR`
+El manifiesto resume que documentos forman parte del indice.
 
-Uso previsto:
+Campos principales:
 
-- descargar `active-index.json`
-- descargar `manifest.json`
-- descargar `chunk_cache.json`
-- descargar los archivos persistidos del indice requeridos por LlamaIndex
+```text
+manifest_version
+embed_model
+files[]
+```
 
-## Modelos de indice
+Por cada archivo:
 
-### IndexManifest
+```text
+file_name
+relative_path
+size
+fingerprint
+```
 
-Representa el conjunto de documentos que forman un indice:
+Uso:
 
-- `manifest_version`
-- `embed_model`
-- `files[]`
-
-Cada archivo indexado guarda:
-
-- `file_name`
-- `relative_path`
-- `size`
-- `fingerprint`
+- detectar cambios reales
+- saber si un PDF ya esta indexado
+- evitar rebuilds innecesarios
+- mantener trazabilidad entre documentos e indice
 
 ## Chunk cache
 
-Cada fragmento serializado guarda:
+El chunk cache guarda fragmentos procesados.
 
-- `file_name`
-- `page_label`
-- `text`
-- `tokens[]`
+Cada fragmento puede incluir:
 
-Eso permite mantener compatibilidad con el flujo actual y luego mover el almacenamiento a Cloud Storage.
+```text
+file_name
+page_label
+text
+tokens[]
+topics[]
+entities[]
+key_terms[]
+```
 
-## Layout sugerido en Cloud Storage
+Uso:
 
-Bucket de documentos:
+- acelerar consultas
+- permitir fallback lexical
+- exponer fuentes
+- reconstruir contexto sin releer todo el PDF
 
-- `documents/<relative_path_del_pdf>`
-
-Bucket o prefijo de indices:
-
-- `indexes/active-index.json`
-- `indexes/current/`
-- `indexes/releases/<release_id>/manifest.json`
-- `indexes/releases/<release_id>/chunk_cache.json`
-
-## Idea del indice activo
-
-La referencia estable para la API no debe depender de un release hardcodeado. La API deberia leer un puntero estable, por ejemplo:
-
-- `indexes/active-index.json`
-
-Ese puntero deberia indicar:
-
-- nombre del indice activo
-- ubicacion del `manifest.json`
-- ubicacion del `chunk_cache.json`
-- prefijo de storage del release
-- timestamp de actualizacion
-
-## Contrato Firestore sugerido
+## Firestore
 
 ### Coleccion `documents`
 
-Un registro por PDF:
+Un registro por documento.
 
-- `document_id`
-- `file_name`
-- `relative_path`
-- `storage_path`
-- `fingerprint`
-- `status`
-- `created_at`
-- `updated_at`
+Campos frecuentes:
+
+```text
+document_id
+file_name
+relative_path
+storage_path
+fingerprint
+size
+status
+topics
+entities
+key_terms
+created_at
+updated_at
+```
+
+Estados:
+
+```text
+pending_index
+indexed
+failed
+deleted
+```
 
 ### Coleccion `reindex_jobs`
 
-Un registro por job:
+Un registro por ejecucion de reindexado.
 
-- `job_id`
-- `trigger`
-- `status`
-- `started_at`
-- `finished_at`
-- `release_name`
-- `error_message`
+Campos frecuentes:
+
+```text
+job_id
+trigger
+status
+started_at
+finished_at
+release_name
+error_message
+total_documents
+processed_documents
+progress
+```
 
 ### Coleccion `runtime_state`
 
-Estado operativo compartido:
+Estado operativo compartido.
 
-- `active_index`
-- `last_successful_reindex`
-- `last_failed_reindex`
-- `last_reindex_status`
-- `last_reindex_job_id`
+Campos frecuentes:
 
-## Siguiente implementacion natural
+```text
+active_index
+last_reindex_status
+last_reindex_job_id
+reindex_progress
+reindex_stage
+reindex_detail
+frequent_questions
+last_generation_status
+```
 
-1. Adaptar el backend para leer y escribir este contrato en `local` o `gcs`
-2. Definir un repositorio para metadatos `none|firestore`
-3. Preparar el proceso de reindexado para publicar releases y actualizar el puntero activo
+## Reindexado
+
+El entrypoint batch es:
+
+```powershell
+python -m app.reindex_job
+```
+
+Responsabilidades:
+
+1. leer PDFs desde el backend documental configurado
+2. extraer texto
+3. dividir en fragmentos
+4. generar embeddings
+5. construir indice
+6. publicar artefactos
+7. actualizar Firestore
+8. marcar indice activo
+
+## Reglas de consistencia
+
+- Si un PDF cambia, debe quedar como `pending_index`.
+- Si el reindexado termina bien, debe quedar como `indexed`.
+- Si falla lectura o analisis, debe quedar como `failed`.
+- El backend web no debe reconstruir indices pesados en vivo.
+- El job es la fuente confiable para publicar un indice nuevo.
+
+## Limpieza y seguridad
+
+- No subir secretos a Git.
+- No versionar indices generados.
+- No empaquetar PDFs dentro de la imagen Docker.
+- No depender de `backend/storage/` en Cloud Run.
+- Usar Secret Manager para claves sensibles.

@@ -1,41 +1,86 @@
-# Documentacion del proyecto
+# Documentacion de AGROJ ESPECIALIZADO
 
-Esta carpeta centraliza la documentacion operativa y de seguimiento del proyecto.
+Esta carpeta contiene la documentacion tecnica, operativa y de seguimiento del proyecto. La idea es que cualquier persona pueda entender el sistema, levantarlo, desplegarlo y continuar el trabajo sin depender de explicaciones externas.
 
-## Archivos principales
+## Lectura recomendada
 
-- [architecture.md](architecture.md): arquitectura objetivo en Google Cloud, responsabilidades y decisiones de alto nivel
-- [cloud-contract.md](cloud-contract.md): contrato tecnico para documentos, indices, releases y estado cloud
-- [cloud-run-jobs.md](cloud-run-jobs.md): contenedor, comandos y consideraciones para Cloud Run y Cloud Run Jobs
-- [evidence-log.md](evidence-log.md): registro de capturas, errores, pruebas, interfaces y avances utiles para resultados y anexos
-- [glossary.md](glossary.md): terminos tecnicos usados en el proyecto y su significado practico
-- [project-status.md](project-status.md): estado actual, avances, pendientes y siguientes pasos
-- [work-summary-2026-05-11.md](work-summary-2026-05-11.md): resumen narrativo del trabajo implementado, problemas resueltos y validaciones del bloque actual
+Para una primera lectura, sigue este orden:
 
-## Bloque actual mas importante
+1. [project-status.md](project-status.md): estado actual, que esta hecho y que falta.
+2. [architecture.md](architecture.md): arquitectura del sistema y decisiones tecnicas principales.
+3. [cloud-run-jobs.md](cloud-run-jobs.md): como operar backend, frontend y reindexado en Google Cloud.
+4. [cloud-contract.md](cloud-contract.md): contrato tecnico de documentos, indices, Firestore y Cloud Storage.
+5. [glossary.md](glossary.md): terminos clave explicados en lenguaje sencillo.
+6. [evidence-log.md](evidence-log.md): bitacora de errores, pruebas, decisiones y avances.
+7. [memoria_tecnica_senadi.md](memoria_tecnica_senadi.md): memoria tecnica para registro formal del software.
 
-En el estado actual del proyecto, los cambios mas relevantes quedaron documentados en:
+## Mapa rapido
 
-- `project-status.md`: estado consolidado del panel de gestion documental, reindexado manual y proximos pasos de despliegue
-- `architecture.md`: decisiones de arquitectura sobre gestion documental, autenticacion Google, cuentas autorizadas y politica de reindexado manual
-- `architecture.md`: tambien documenta el modelo NLP real del sistema, el papel de Gemini y Hugging Face, el concepto de corpus y la evolucion recomendada de gobernanza documental
-- `architecture.md`: documenta el enriquecimiento del corpus con `spaCy` y la decision de no incorporar `NLTK` mientras no aporte valor adicional claro
-- `cloud-run-jobs.md`: operacion cloud actual, variables necesarias para acceso protegido y uso manual del reindexado
-- `evidence-log.md`: errores importantes encontrados, decisiones tecnicas y correcciones aplicadas durante este bloque
-- `evidence-log.md`: tambien registra cambios visibles de interfaz, tono conversacional y validaciones de build cuando afectan la experiencia del usuario
-- `glossary.md`: incluye definiciones practicas de `RAG`, `corpus`, estados documentales, `embeddings`, `Gemini`, `Hugging Face`, `spaCy` y `NLTK`
+| Archivo | Para que sirve |
+| --- | --- |
+| `project-status.md` | Resume el estado real del proyecto, avances, riesgos y proximos pasos. |
+| `architecture.md` | Explica la arquitectura RAG, frontend, backend, cloud, documentos e IA. |
+| `cloud-contract.md` | Define como se organizan documentos, indices, manifiestos y estado en cloud. |
+| `cloud-run-jobs.md` | Guia de build, deploy, reindexado, logs y monitoreo en Google Cloud. |
+| `glossary.md` | Aclara conceptos como RAG, embeddings, corpus, Firestore y Cloud Run Jobs. |
+| `evidence-log.md` | Registra eventos importantes del desarrollo, errores encontrados y correcciones. |
+| `memoria_tecnica_senadi.md` | Describe tecnicamente el software para fines de proteccion y presentacion formal. |
+| `work-summary-2026-05-11.md` | Resumen narrativo de una etapa especifica del trabajo. |
 
-## Regla de mantenimiento
+## Resumen tecnico corto
 
-Despues de cada bloque de trabajo importante, actualizar:
+AGROJ ESPECIALIZADO es un sistema de consulta agricola basado en documentos PDF. Usa una arquitectura RAG:
 
-1. `project-status.md`
-2. `architecture.md` si hubo cambios de direccion tecnica
-3. `evidence-log.md` si hubo capturas, errores, pruebas o avances verificables
+```text
+Pregunta del usuario
+  -> busqueda en documentos indexados
+  -> seleccion de fragmentos relevantes
+  -> generacion de respuesta con Gemini
+  -> respuesta clara en el chat
+```
 
-## Criterio de limpieza
+Componentes principales:
 
-- Documentar decisiones reales, no ideas sueltas que ya no apliquen
-- Quitar informacion obsoleta cuando una estrategia deje de ser vigente
-- Mantener pendientes concretos y accionables
-- Evitar duplicar la misma explicacion en muchos archivos
+- `React + Vite`: interfaz web.
+- `FastAPI`: backend y API.
+- `LlamaIndex`: framework RAG.
+- `sentence-transformers/all-MiniLM-L6-v2`: embeddings.
+- `Gemini 2.5 Flash`: generacion de respuestas.
+- `Cloud Storage`: documentos e indices.
+- `Firestore`: metadatos y estado operativo.
+- `Cloud Run`: backend y frontend.
+- `Cloud Run Jobs`: reindexado pesado.
+
+## Reglas de mantenimiento
+
+Cuando se haga un cambio importante:
+
+1. Actualizar `project-status.md`.
+2. Actualizar `architecture.md` si cambia una decision tecnica.
+3. Actualizar `cloud-run-jobs.md` si cambia algun comando o flujo de despliegue.
+4. Agregar una entrada en `evidence-log.md` si hubo error, validacion, deploy, decision o prueba relevante.
+5. Mantener `glossary.md` actualizado si aparece un termino nuevo importante.
+
+## Criterio editorial
+
+- Escribir para una persona que llega al proyecto por primera vez.
+- Preferir explicaciones concretas sobre teoria larga.
+- Mantener comandos listos para copiar y ejecutar.
+- Separar estado vigente de historia pasada.
+- No documentar secretos reales.
+- No versionar indices, caches, builds ni archivos generados.
+
+## Estado de documentacion
+
+La documentacion actual ya cubre:
+
+- arquitectura RAG del sistema
+- operacion local
+- despliegue en Google Cloud
+- gestion documental
+- subida masiva de documentos
+- reindexado manual
+- limpieza del repositorio
+- memoria tecnica para SENADI
+
+La bitacora historica se mantiene en `evidence-log.md`; no todo lo que aparece ahi representa el estado vigente, sino el camino recorrido.
