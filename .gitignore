@@ -11,3 +11,6 @@ frontend/dist/
 backend/.env
 frontend/.env
 firebase-debug.log
+backend/storage/**
+!backend/storage/.gitkeep
+backend/data/agricultura_tungurahua.pdf

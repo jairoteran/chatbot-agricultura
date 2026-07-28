@@ -8,6 +8,8 @@ Este documento registra que ya esta hecho, que se decidio y que sigue. Debe actu
 
 - Existe un frontend funcional en React + Vite
 - Existe un backend funcional en FastAPI
+- El producto publico adopto el nombre `AGROJ ESPECIALIZADO` en la interfaz, titulo del navegador y metadatos del frontend
+- El repositorio dejo de versionar artefactos generados de `backend/storage/` para mantener el codigo mas limpio
 - Existe un flujo local de RAG con PDFs e indice persistido localmente
 - Existe un endpoint de reindexado local
 - Se definio la nueva arquitectura objetivo en Google Cloud

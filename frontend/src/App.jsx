@@ -21,7 +21,7 @@ const MAX_SAVED_CONVERSATIONS = 12;
 const initialMessage = {
   role: "assistant",
   content:
-    "Hola. Estoy listo para ayudarte. Puede hacer preguntas, pedir resúmenes o comparar información cuando lo necesite.",
+    "Hola. Soy AGROJ ESPECIALIZADO. Estoy listo para ayudarte con consultas agricolas, resumenes o comparacion de informacion cuando lo necesites.",
   sources: [],
 };
 
@@ -1159,9 +1159,9 @@ function PublicChatApp() {
         </div>
 
         <div>
-          <h1>Asistente documental</h1>
+          <h1>AGROJ ESPECIALIZADO</h1>
           <p className="sidebar-copy">
-            Consultas con IA sobre sus archivos.
+            Asistente agricola especializado.
           </p>
         </div>
 
@@ -1284,7 +1284,7 @@ function PublicChatApp() {
           <div className="chat-header">
             <div>
               <p className="eyebrow">Conversacion</p>
-              <h2>Consulta tus documentos</h2>
+              <h2>Consulta con AGROJ ESPECIALIZADO</h2>
             </div>
             <div className="chat-header-actions">
               <button
@@ -1456,7 +1456,7 @@ function PublicChatApp() {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Escribe tu pregunta sobre los documentos..."
+            placeholder="Escribe tu pregunta agricola..."
             rows={1}
             disabled={!backendReady}
           />

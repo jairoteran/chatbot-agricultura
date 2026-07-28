@@ -1,6 +1,6 @@
-# PDF Chat App
+# AGROJ ESPECIALIZADO
 
-Aplicacion web para consultar documentos PDF con una interfaz de chat. El proyecto usa un frontend en React y un backend en FastAPI con capacidades RAG para recuperar, resumir y explicar informacion de los documentos.
+Aplicacion web especializada en consultas agricolas sobre una base documental. El proyecto usa un frontend en React y un backend en FastAPI con capacidades RAG para recuperar, resumir y explicar informacion de los documentos.
 
 ## Estado actual
 
@@ -9,7 +9,7 @@ La arquitectura local actual sigue funcionando con:
 - `frontend/`: interfaz web en React + Vite
 - `backend/`: API en FastAPI + servicio RAG
 - `backend/data/`: PDFs locales de desarrollo
-- `backend/storage/`: indice persistido local heredado de la etapa anterior
+- `backend/storage/`: carpeta local para indices generados durante desarrollo; sus artefactos no se versionan
 
 La siguiente etapa del proyecto migra a una arquitectura en Google Cloud orientada a crecimiento y operacion mas profesional.
 

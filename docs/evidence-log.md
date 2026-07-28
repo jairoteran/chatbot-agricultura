@@ -39,6 +39,14 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 
 - que se observo
 
+## 2026-07-26 - Marca publica y limpieza para entrega formal
+
+- Contexto: se decidio nombrar el chat como `AGROJ ESPECIALIZADO` y preparar el repositorio para una entrega mas limpia ante SENADI.
+- Evidencia: el frontend actualizo el nombre visible del asistente, el titulo HTML y el nombre del paquete a `agroj-especializado-frontend`.
+- Evidencia: los artefactos generados de `backend/storage/` dejaron de versionarse y quedaron ignorados para evitar que indices, caches y builds locales ensucien el codigo fuente.
+- Evidencia: se eliminaron archivos heredados de despliegue en Vercel (`vercel.json` y el adaptador `api/index.py`) porque la arquitectura vigente usa Google Cloud.
+- Decision: los documentos del corpus se tratan con cuidado porque pueden funcionar como evidencia o base documental; los nuevos PDFs de prueba no deben entrar automaticamente al repositorio.
+
 ## 2026-05-13 - Frontend listo para Hosting
 
 - Contexto: el backend ya habia quedado plenamente operativo en Google Cloud, pero faltaba cerrar la publicacion del cliente web.
