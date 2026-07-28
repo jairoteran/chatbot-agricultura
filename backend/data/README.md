@@ -1,7 +1,17 @@
-Coloca aqui los archivos PDF que quieras indexar.
+# Datos locales de desarrollo
 
-Ejemplos:
-- `backend/data/contrato.pdf`
-- `backend/data/manuales/manual-usuario.pdf`
+Esta carpeta queda disponible para pruebas locales, pero los PDFs no se versionan en Git.
 
-El backend leera todos los archivos `.pdf` dentro de esta carpeta y sus subcarpetas.
+En el entorno cloud vigente, los documentos oficiales viven en:
+
+```text
+gs://tesis-producto-dev-documents/documents/
+```
+
+Uso local opcional:
+
+1. Coloca aqui PDFs de prueba.
+2. Ejecuta el reindexado local.
+3. No agregues esos PDFs al repositorio.
+
+El objetivo es mantener GitHub limpio y separar codigo fuente de corpus documental pesado.

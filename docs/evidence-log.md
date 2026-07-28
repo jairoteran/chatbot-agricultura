@@ -48,6 +48,7 @@ Guardar evidencia util del proyecto para reutilizarla despues en:
 - Evidencia: el `Dockerfile` del backend dejo de copiar `backend/storage/` y ahora crea la carpeta vacia dentro del contenedor, evitando fallos de build cuando los indices generados estan ignorados.
 - Evidencia: el `README.md` se reestructuro como guia principal de GitHub, incluyendo descripcion del sistema, arquitectura RAG, desarrollo local, despliegue cloud, gestion documental, subida masiva y guia para nuevos colaboradores.
 - Evidencia: la carpeta `docs/` se reorganizo con guias mas claras para arquitectura, contrato cloud, operacion de Cloud Run Jobs, glosario, estado del proyecto y memoria tecnica SENADI.
+- Evidencia: los PDFs de `backend/data/` salieron del control de versiones y la carpeta quedo como espacio local de desarrollo con `README.md`, porque el corpus oficial opera en Cloud Storage.
 - Decision: los documentos del corpus se tratan con cuidado porque pueden funcionar como evidencia o base documental; los nuevos PDFs de prueba no deben entrar automaticamente al repositorio.
 
 ## 2026-05-13 - Frontend listo para Hosting
