@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$root = "C:\Users\Jairo Teran\Downloads\Tesis\Producto"
+$root = Resolve-Path "$PSScriptRoot\.."
 $healthUrl = "http://127.0.0.1:8000/health"
 $reindexUrl = "http://127.0.0.1:8000/reindex"
 

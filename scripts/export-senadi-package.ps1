@@ -6,10 +6,13 @@
     builds, secretos, PDFs locales, indices y caches generados.
 #>
 
+param(
+    [string]$OutputDir = (Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads\codigo_limpio")
+)
+
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."
-$OutputDir = "C:\Users\Jairo Teran\Downloads\codigo_limpio"
 $ExportSourceDir = Join-Path $OutputDir "codigo_fuente"
 $ZipPath = Join-Path $OutputDir "senadi_agroj_especializado.zip"
 

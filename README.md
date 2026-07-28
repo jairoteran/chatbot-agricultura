@@ -140,7 +140,7 @@ Requisitos recomendados:
 ### Backend local
 
 ```powershell
-cd "C:\Users\Jairo Teran\Downloads\Tesis\Producto\backend"
+cd "<RUTA_DEL_PROYECTO>\backend"
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -163,7 +163,7 @@ Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/health" |
 En otra terminal:
 
 ```powershell
-cd "C:\Users\Jairo Teran\Downloads\Tesis\Producto\frontend"
+cd "<RUTA_DEL_PROYECTO>\frontend"
 
 npm install
 npm run dev
@@ -180,7 +180,7 @@ El frontend usa el proxy de Vite para hablar con el backend local en `127.0.0.1:
 ### Inicio rapido desde la raiz
 
 ```powershell
-cd "C:\Users\Jairo Teran\Downloads\Tesis\Producto"
+cd "<RUTA_DEL_PROYECTO>"
 .\start-all.ps1
 ```
 
@@ -284,7 +284,7 @@ Para un paquete grande se recomienda ampliar recursos del job:
 Desde la raiz del proyecto:
 
 ```powershell
-cd "C:\Users\Jairo Teran\Downloads\Tesis\Producto"
+cd "<RUTA_DEL_PROYECTO>"
 ```
 
 ### Backend
